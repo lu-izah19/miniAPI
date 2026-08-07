@@ -1,7 +1,8 @@
-# Importa a classe FastAPI para criar a aplicação web (embora não esteja sendo usada nas rotas ainda)
 from fastapi import FastAPI
 # Importa o módulo logging para exibir mensagens de status/erro formatadas
 import logging
+
+from pydantic import BaseModel
 
 # Configura o sistema de logging para exibir mensagens de nível INFO ou superior
 logging.basicConfig(level=logging.INFO)
@@ -12,7 +13,7 @@ app = FastAPI()
 def home():
     return {"message": "Bem-vindo à API!"}
 
-# Texto do menu que será exibido para o usuário no terminal
+# Texto de menu herdado da versão em terminal; nenhuma rota desta API o utiliza
 menu = """
 1. Cadastro
 2. Login
@@ -20,8 +21,10 @@ menu = """
 4.Sair
 """
 
-# Classe que guarda os dados do usuário atual (nome, email, senha) em memória
-# Substitui o antigo dicionário "usuario" usado na versão de terminal
+# Classe que representa os dados de um usuário (nome, email, senha)
+# As rotas abaixo leem e gravam esses dados diretamente nos atributos da classe
+# (Usuario.nome, Usuario.email, Usuario.senha), não em uma instância — ou seja,
+# os dados ficam compartilhados entre todas as requisições, e não por usuário
 class Usuario:
     # Construtor: todos os campos são opcionais para permitir criar o objeto
     # em etapas (primeiro só com nome, depois só com email/senha)
@@ -30,88 +33,85 @@ class Usuario:
         self.email = email
         self.senha = senha
 
-# Rota GET que dispara o fluxo principal do "menu" via terminal
-# (nome na URL não é usado dentro da função, é só o path da rota)
-@app.get("/usuario/{nome}")
-# Função principal que controla o fluxo do programa via terminal
-def inicio():
-    # Pede o nome do usuário
-    nome = input("Digite seu nome: ")
-    # Cria uma instância da classe Usuario com o nome fornecido
-    usuario = Usuario(nome=nome)
-    # Loga uma mensagem de boas-vindas personalizada
-    logging.info("Olá %s, seja bem vindo(a)!", nome)
-    # Loop infinito que mantém o menu ativo até o usuário escolher sair
-    while True:
-        # Exibe o menu de opções
-        print(menu)
-        # Lê a opção escolhida pelo usuário
-        opcao = input("Escolha uma opção: ")
-        # Se a opção for "1", chama a função de cadastro
-        if opcao == "1":
-            cadastro()
-        # Se a opção for "2", chama a função de login
-        elif opcao == "2":
-            login()
-        # Se a opção for "3", chama a função de perfil
-        elif opcao == "3":
-            perfil()
-        # Se a opção for "4", loga a saída e interrompe o loop (encerra o programa)
-        elif opcao == "4":
-            logging.info("Saindo da API...")
-            break
-        # Para qualquer outra entrada, avisa que a opção é inválida e repete o menu
-        else:
-            logging.warning("Opção inválida!")
+class UsuarioCadastro(BaseModel):
+    nome: str
+    email: str
+    senha: str
+
+class UsuarioInicio(BaseModel):
+    nome: str
+
+class UsuarioLogin(BaseModel):
+    email: str
+    senha: str
+
+# Rota GET que recebe o nome do usuário no corpo da requisição
+# e registra uma mensagem de boas-vindas no log
+@app.get("/usuario")
+# Função executada ao acessar a rota GET /usuario
+def inicio(dados: UsuarioInicio):
+    # Cria uma instância local da classe Usuario apenas para montar a mensagem de boas-vindas
+    usuario = Usuario(nome=dados.nome)
+    # Loga uma mensagem de boas-vindas personalizada com o nome informado
+    logging.info("Olá %s, seja bem vindo(a)!", usuario.nome)
+    # Atenção: essa instância não é salva em lugar nenhum; os dados usados pelas
+    # outras rotas (cadastro, login, perfil) ficam nos atributos da classe Usuario
 
 
 # Rota POST que recebe email e senha para cadastro
-@app.post("/usuario/{email}/{senha}")
+@app.post("/usuario")
 # Função responsável por cadastrar o email e a senha do usuário
-def cadastro():
+def cadastro(dados: UsuarioCadastro):
     # Pede o email do usuário
-    email = input("Digite seu email: ")
+    email = dados.email
     # Pede a senha do usuário
-    senha = input("Digite sua senha: ")
-    # Declara que "usuario" aqui se refere à variável global, não a uma nova local
+    senha = dados.senha
+    # Declaração sem efeito prático aqui: a variável global "usuario" nunca chega a
+    # ser atribuída nesta função — os dados são gravados na classe Usuario abaixo
     global usuario
-    # Atenção: cria um Usuario NOVO (sem nome), sobrescrevendo o objeto criado em inicio()
-    # e perdendo o nome salvo anteriormente
-    usuario = Usuario(email=email, senha=senha)
-    # Retorna uma confirmação de cadastro 
+    # Salva o email como atributo da classe Usuario (não de uma instância)
+    Usuario.email = email
+    # Salva a senha como atributo da classe Usuario (não de uma instância)
+    Usuario.senha = senha
+    # Como email e senha são gravados na classe (e não em uma instância), o nome
+    # definido em inicio() não é sobrescrito, mas também não é usado por esta rota
+
+    # Retorna uma confirmação de cadastro
     return {"mensagem": "Cadastro realizado com sucesso!"}
 
-# Rota GET para autenticação (reutiliza o mesmo path "/usuario/{email}/{senha}" do cadastro, mas em outro método HTTP)
-@app.get("/usuario/{email}/{senha}")
+# Rota POST para autenticação, recebe email e senha no corpo da requisição
+@app.post("/login")
 # Função responsável por autenticar o usuário já cadastrado
-def login():
+def login(dados: UsuarioLogin):
     # Pede o email para login
-    email_login = input("Digite seu email para login: ")
+    email_login = dados.email
     # Pede a senha para login
-    senha_login = input("Digite sua senha para login: ")
-    # Declara que "usuario" aqui se refere à variável global, não a uma nova local
+    senha_login = dados.senha
+    # Declaração sem efeito prático aqui: a variável global "usuario" nunca é usada
+    # nesta função — a comparação abaixo usa os atributos da classe Usuario
     global usuario
-    # Compara os dados digitados com os dados salvos no objeto usuario
-    if email_login == usuario.email and senha_login == usuario.senha:
+    # Compara os dados recebidos com os atributos salvos na classe Usuario
+    if email_login == Usuario.email and senha_login == Usuario.senha:
         # Se os dados baterem, loga sucesso no login
         logging.info("Login realizado com sucesso!")
     else:
         logging.warning("Credenciais inválidas!")
 
 # Rota GET para exibir o perfil do usuário
-@app.get("/usuario/{nome}/{email}")
-# Função que exibe os dados do perfil do usuário logado
-def perfil():
-    # Declara que "usuario" aqui se refere à variável global, não a uma nova local
+@app.get("/perfil")
+# Função que exibe os dados atualmente salvos na classe Usuario
+def perfil(dados: Usuario):
+    # Declaração sem efeito prático aqui: a variável global "usuario" nunca é usada
+    # nesta função — os dados exibidos abaixo vêm dos atributos da classe Usuario
     global usuario
     # Loga que está acessando o perfil
     logging.info("Acessando o perfil do usuário...")
     # Exibe o nome salvo do usuário
-    logging.info("nome: %s", usuario.nome)
+    logging.info("nome: %s", Usuario.nome)
     # Exibe o email salvo do usuário
-    logging.info("Email: %s", usuario.email)
+    logging.info("Email: %s", Usuario.email)
     # Informa como sair da tela de perfil (mas nada aqui realmente sai, é só uma instrução)
     logging.info("Para sair do perfil, digite 4.")
 
-# Chama a função inicio() para começar a execução do programa assim que o arquivo é executado
-inicio()
+# Fim do arquivo: não há bloco "__main__"; a aplicação deve ser iniciada
+# externamente, por exemplo com "uvicorn api:app --reload"
