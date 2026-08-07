@@ -9,7 +9,7 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 ## Status
 
-🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já possui rotas definidas, mas ainda está em processo de refatoração (migração de `input()` para dados recebidos via requisição).
+🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, e não depende mais de `input()`/menu de terminal para rodar. Ainda restam ajustes de segurança e persistência de dados (ver "Próximos passos").
 
 ## Funcionalidades
 
@@ -22,6 +22,7 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 - Python 3
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
+- [Pydantic](https://docs.pydantic.dev/) *(validação de dados de entrada na versão API)*
 - Módulo `logging` da biblioteca padrão
 
 ## Versão terminal
@@ -52,17 +53,18 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/` | Rota inicial, mensagem de boas-vindas |
-| `POST` | `/usuario/{email}/{senha}` | Cadastro de novo usuário |
-| `GET` | `/usuario/{email}/{senha}` | Login do usuário |
-| `GET` | `/usuario/{nome}/{email}` | Visualização de perfil |
+| `GET` | `/usuario` | Boas-vindas personalizada com o nome do usuário |
+| `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha) |
+| `POST` | `/login` | Login do usuário (email e senha) |
+| `GET` | `/perfil` | Visualização de perfil do usuário logado |
+
+> Cada ação passou a ter seu próprio path (`/usuario`, `/login`, `/perfil`), o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
 
 ### Como rodar
 
 ```bash
 uvicorn api:app --reload
 ```
-
-> **Nota:** no formato atual, ao rodar com `uvicorn`, a chamada de `inicio()` no final do arquivo entra em conflito com o modelo de servidor (fica esperando `input()` de terminal em vez de subir o servidor). Esse é justamente um dos itens listados em "Próximos passos" abaixo.
 
 Depois de rodar, a documentação interativa gerada automaticamente pelo FastAPI fica disponível em:
 
@@ -72,21 +74,28 @@ http://127.0.0.1:8000/docs
 
 ### Próximos passos
 
-- [ ] Remover o uso de `input()` dentro das funções de rota, substituindo por dados recebidos via parâmetros de URL ou corpo da requisição
-- [ ] Ajustar a função `inicio()` para não rodar automaticamente junto com o servidor (conflito entre o modelo de terminal e o modelo de API)
-- [ ] Corrigir a criação do `Usuario` em `cadastro()`: hoje ela sobrescreve o objeto sem o campo `nome`, perdendo o dado salvo anteriormente em `inicio()`
+- [ ] Corrigir `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados em uma variável de estado separada (`usuario = Usuario(...)`), em vez de escrever/ler diretamente nos atributos da classe `Usuario`
 - [ ] Implementar hash de senha com `bcrypt` (armazenamento seguro de credenciais)
 - [ ] Definir o formato de armazenamento dos dados de usuário (orientação da supervisora)
 - [ ] Estruturar autorização de perfil de usuário
+
+### Resolvido recentemente
+
+- [x] Removido o uso de `input()` e do loop de menu dentro das rotas
+- [x] Removida a chamada de `inicio()` no final do arquivo (conflitava com o modelo de servidor do `uvicorn`)
+- [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`) separados da classe `Usuario`, que guarda o estado em memória
+- [x] Corrigido o `__init__` de `Usuario` (faltava `self.` nos atributos)
+- [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
 
 ## Aprendizados do projeto
 
 Este projeto foi usado como base prática para consolidar conceitos de:
 
 - Escopo de variáveis em Python (locais vs. globais) e compartilhamento de dados entre funções
+- Diferença entre um modelo Pydantic (`BaseModel`, usado para validar o corpo da requisição) e uma classe comum usada para guardar estado em memória
 - Boas práticas de segurança básica (nunca logar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
-- Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`) e path parameters
+- Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`), path parameters e por que cada combinação verbo+path deve representar uma única ação
 
 ## Autora
 
