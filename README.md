@@ -9,7 +9,7 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 ## Status
 
-🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, e não depende mais de `input()`/menu de terminal para rodar. Ainda restam ajustes de segurança e persistência de dados (ver "Próximos passos").
+🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, não depende mais de `input()`/menu de terminal para rodar, e já persiste o estado do usuário corretamente entre requisições (cadastro → login → perfil testados e funcionando). Ainda restam ajustes de segurança e persistência real em banco de dados (ver "Próximos passos").
 
 ## Funcionalidades
 
@@ -74,16 +74,16 @@ http://127.0.0.1:8000/docs
 
 ### Próximos passos
 
-- [ ] Corrigir `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados em uma variável de estado separada (`usuario = Usuario(...)`), em vez de escrever/ler diretamente nos atributos da classe `Usuario`
 - [ ] Implementar hash de senha com `bcrypt` (armazenamento seguro de credenciais)
-- [ ] Definir o formato de armazenamento dos dados de usuário (orientação da supervisora)
+- [ ] Definir o formato de armazenamento dos dados de usuário (orientação da supervisora) — hoje o estado vive numa única variável global (`usuario_cadastro`), o que só suporta um usuário por vez; avaliar dicionário indexado por email ou banco de dados
 - [ ] Estruturar autorização de perfil de usuário
 
 ### Resolvido recentemente
 
+- [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario` guardada em variável de módulo (`usuario_cadastro`, controlada via `global`), em vez de escrever/ler diretamente em atributos de classe
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
 - [x] Removida a chamada de `inicio()` no final do arquivo (conflitava com o modelo de servidor do `uvicorn`)
-- [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`) separados da classe `Usuario`, que guarda o estado em memória
+- [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`) separados da classe `Usuario`, que guarda o estado em memória
 - [x] Corrigido o `__init__` de `Usuario` (faltava `self.` nos atributos)
 - [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
 
@@ -91,8 +91,9 @@ http://127.0.0.1:8000/docs
 
 Este projeto foi usado como base prática para consolidar conceitos de:
 
-- Escopo de variáveis em Python (locais vs. globais) e compartilhamento de dados entre funções
+- Escopo de variáveis em Python (locais, de classe e de módulo/`global`) e compartilhamento de estado entre requisições diferentes
 - Diferença entre um modelo Pydantic (`BaseModel`, usado para validar o corpo da requisição) e uma classe comum usada para guardar estado em memória
+- Por que gravar em atributo de classe (`Classe.atributo = valor`) compartilha o dado entre todas as instâncias/requisições, e por que isso é um anti-padrão para estado por usuário
 - Boas práticas de segurança básica (nunca logar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`), path parameters e por que cada combinação verbo+path deve representar uma única ação
