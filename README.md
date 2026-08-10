@@ -9,7 +9,7 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 ## Status
 
-🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, não depende mais de `input()`/menu de terminal para rodar, e já persiste o estado do usuário corretamente entre requisições (cadastro → login → perfil testados e funcionando). Ainda restam ajustes de segurança e persistência real em banco de dados (ver "Próximos passos").
+🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, não depende mais de `input()`/menu de terminal para rodar, salva a senha como hash (`bcrypt`) em vez de texto puro, e está em processo de migração do armazenamento de um único usuário (variável global) para múltiplos usuários (dicionário indexado por email). Ainda restam ajustes de autorização e persistência real em banco de dados (ver "Próximos passos").
 
 ## Funcionalidades
 
@@ -23,6 +23,7 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 - Python 3
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
 - [Pydantic](https://docs.pydantic.dev/) *(validação de dados de entrada na versão API)*
+- [bcrypt](https://pypi.org/project/bcrypt/) *(hash de senhas na versão API)*
 - Módulo `logging` da biblioteca padrão
 
 ## Versão terminal
@@ -74,13 +75,15 @@ http://127.0.0.1:8000/docs
 
 ### Próximos passos
 
-- [ ] Implementar hash de senha com `bcrypt` (armazenamento seguro de credenciais)
-- [ ] Definir o formato de armazenamento dos dados de usuário (orientação da supervisora) — hoje o estado vive numa única variável global (`usuario_cadastro`), o que só suporta um usuário por vez; avaliar dicionário indexado por email ou banco de dados
+- [ ] Finalizar a migração de `usuario_cadastro` para dicionário: `cadastro()` já grava por email (`usuario_cadastro[email] = novo_usuario`), mas `login()` e `perfil()` ainda usam a sintaxe antiga de objeto único (`usuario_cadastro.email`) e precisam ser ajustados para buscar o usuário certo dentro do dicionário
+- [ ] Definir o formato de armazenamento definitivo dos dados de usuário (orientação da supervisora) — dicionário em memória é um passo intermediário; avaliar se o destino final é banco de dados
 - [ ] Estruturar autorização de perfil de usuário
 
 ### Resolvido recentemente
 
-- [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario` guardada em variável de módulo (`usuario_cadastro`, controlada via `global`), em vez de escrever/ler diretamente em atributos de classe
+- [x] Implementado hash de senha com `bcrypt` (`hashpw`/`gensalt` no cadastro, `checkpw` no login) — senha nunca mais é salva ou comparada em texto puro; testado com login válido e inválido
+- [x] Iniciada a migração de `usuario_cadastro` de variável única para dicionário (`{}`), permitindo múltiplos usuários cadastrados ao mesmo tempo — `cadastro()` já ajustado
+- [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario`, em vez de escrever/ler diretamente em atributos de classe
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
 - [x] Removida a chamada de `inicio()` no final do arquivo (conflitava com o modelo de servidor do `uvicorn`)
 - [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`) separados da classe `Usuario`, que guarda o estado em memória
@@ -94,7 +97,9 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Escopo de variáveis em Python (locais, de classe e de módulo/`global`) e compartilhamento de estado entre requisições diferentes
 - Diferença entre um modelo Pydantic (`BaseModel`, usado para validar o corpo da requisição) e uma classe comum usada para guardar estado em memória
 - Por que gravar em atributo de classe (`Classe.atributo = valor`) compartilha o dado entre todas as instâncias/requisições, e por que isso é um anti-padrão para estado por usuário
-- Boas práticas de segurança básica (nunca logar senhas em texto puro)
+- Por que uma única variável global (mesmo guardando uma instância corretamente) só suporta um usuário por vez, e como um dicionário indexado por uma chave única (email) resolve isso
+- Hash de senhas com `bcrypt`: por que é irreversível, por que usa salt, e por que a verificação (`checkpw`) nunca "descriptografa" a senha salva
+- Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`), path parameters e por que cada combinação verbo+path deve representar uma única ação
 
