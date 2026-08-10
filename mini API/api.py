@@ -2,6 +2,8 @@ from fastapi import FastAPI
 # Módulo padrão de logging, usado no lugar de print() para as mensagens de status/erro
 import logging
 
+import bcrypt
+
 from pydantic import BaseModel
 
 # Define o nível mínimo de log exibido como INFO (mostra INFO, WARNING, ERROR, etc.)
@@ -32,8 +34,8 @@ class Usuario:
         self.email = email
         self.senha = senha
 
-# Guarda o usuário cadastrado como instância de Usuario; permanece None até cadastro() ser chamado
-usuario_cadastro = None
+usuario_cadastro = {}
+# Variável global para armazenar o usuário cadastrado 
 
 # Modelo de validação do corpo da requisição de cadastro (POST /usuario)
 class UsuarioCadastro(BaseModel):
@@ -69,12 +71,13 @@ def inicio(dados: UsuarioInicio):
 @app.post("/usuario")
 def cadastro(dados: UsuarioCadastro):
     email = dados.email
-    senha = dados.senha
+    senha_hash = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
     # Grava o cadastro na variável global usuario_cadastro, como uma instância de
     # Usuario (nome não é informado aqui, então permanece None); login() e perfil()
     # leem os dados a partir dessa mesma variável global
     global usuario_cadastro
-    usuario_cadastro = Usuario(nome=None, email=email, senha=senha)
+    novo_usuario = Usuario(nome=None, email=email, senha=senha_hash)
+    usuario_cadastro[email] = novo_usuario
     # Confirma o cadastro para quem chamou a rota
     return {"mensagem": "Cadastro realizado com sucesso!"}
 
@@ -84,13 +87,15 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     senha_login = dados.senha
 
+    
     # Compara os dados recebidos com os dados salvos em usuario_cadastro (definidos
     # em cadastro()). Se nenhum cadastro tiver sido feito ainda, usuario_cadastro
     # continua None e esta linha levanta AttributeError
-    if email_login == usuario_cadastro.email and senha_login == usuario_cadastro.senha:
+    if email_login == usuario_cadastro[email_login].email and bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
         # Credenciais conferem: loga sucesso no login
         logging.info("Login realizado com sucesso!")
     else:
+        # Credenciais não conferem: loga aviso de credenciais inválidas
         logging.warning("Credenciais inválidas!")
 
 # Rota GET para exibir o perfil do usuário
@@ -102,10 +107,11 @@ def perfil(dados: UsuarioPerfil):
     # define o nome, o campo "nome" logado abaixo sempre aparece como None
 
     logging.info("Acessando o perfil do usuário...")
-    logging.info("nome: %s", usuario_cadastro.nome)
+    logging.info("nome: %s", usuario_cadastro[usuario_cadastro.email].nome)
     logging.info("Email: %s", usuario_cadastro.email)
     # Apenas uma instrução textual no log; não interrompe nem finaliza a execução
     logging.info("Para sair do perfil, digite 4.")
 
 # Fim do arquivo: não há bloco "__main__"; a aplicação deve ser iniciada
 # externamente, por exemplo com "uvicorn api:app --reload"
+
