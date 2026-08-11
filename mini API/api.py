@@ -1,122 +1,113 @@
-import email
-
+# Importa a classe FastAPI, usada para criar a aplicação/API
 from fastapi import FastAPI
-# Módulo padrão de logging, usado no lugar de print() para as mensagens de status/erro
+app = FastAPI()
+# Importa o módulo de logging, usado para registrar mensagens (info, erro, etc.)
 import logging
-
+# Importa o módulo jwt (PyJWT), usado para gerar e validar tokens de autenticação
+import jwt
+# Importa o bcrypt, usado para gerar hash e verificar senhas de forma segura
 import bcrypt
-
+# Importa a função que carrega variáveis de ambiente de um arquivo .env
+from dotenv import load_dotenv
+# Importa o módulo os, usado para acessar variáveis de ambiente do sistema
+import os
+# Importa BaseModel do pydantic, usado para criar os modelos de dados (schemas) da API
 from pydantic import BaseModel
 
-# Define o nível mínimo de log exibido como INFO (mostra INFO, WARNING, ERROR, etc.)
+# Carrega as variáveis definidas no arquivo .env para o ambiente do processo
+load_dotenv()
+# Lê a variável de ambiente SECRET_KEY, usada para assinar os tokens JWT
+SECRET_KEY =os.environ.get("SECRET_KEY")
+
+# Configura o logging para exibir mensagens a partir do nível INFO
 logging.basicConfig(level=logging.INFO)
 
-# Instância principal da aplicação FastAPI
-app = FastAPI()
+# Rota GET na raiz ("/") da API
 @app.get("/")
 def home():
+    # Retorna uma mensagem simples de boas-vindas em formato JSON
     return {"message": "Bem-vindo à API!"}
 
-# Texto de menu herdado da versão em terminal do projeto; nenhuma rota desta API o utiliza
-menu = """
-1. Cadastro
-2. Login
-3. Perfil
-4.Sair
-"""
-
-# Classe genérica para guardar os dados de um usuário (nome, email, senha).
-# É usada tanto para a instância local descartável de inicio() quanto para os
-# objetos guardados no dicionário global usuario_cadastro, preenchidos em
-# cadastro() e lidos em login() e perfil()
+# Classe que representa um usuário internamente (não é um modelo do pydantic)
 class Usuario:
-    # Todos os campos são opcionais para permitir montar o objeto com dados parciais
-    # (ex: inicio() usa só o nome; cadastro() usa só email e senha)
+    # Construtor: define nome, email e senha, todos opcionais por padrão
     def __init__(self, nome=None, email=None, senha=None):
         self.nome = nome
         self.email = email
         self.senha = senha
 
+# Dicionário usado como "banco de dados" em memória, indexado pelo email do usuário
 usuario_cadastro = {}
-# Dicionário global que guarda os usuários cadastrados, indexados pelo email
 
-# Modelo de validação do corpo da requisição de cadastro (POST /usuario)
+# Modelo de dados esperado no corpo da requisição de cadastro
 class UsuarioCadastro(BaseModel):
     nome: str
     email: str
     senha: str
 
-# Modelo de validação do corpo da requisição de boas-vindas (GET /usuario)
+# Modelo de dados esperado para a rota de início (apenas o nome)
 class UsuarioInicio(BaseModel):
     nome: str
 
-# Modelo de validação do corpo da requisição de login (POST /login)
+# Modelo de dados esperado no corpo da requisição de login
 class UsuarioLogin(BaseModel):
     email: str
     senha: str
 
-# Modelo não utilizado atualmente: a rota GET /perfil/{email} passou a receber
-# o email como parâmetro de path (veja perfil()), em vez de um corpo de requisição
+# Modelo de dados usado para representar o perfil do usuário (nome e email)
 class UsuarioPerfil(BaseModel):
     nome: str
     email: str
 
-# Rota GET que recebe o nome do usuário e registra uma mensagem de boas-vindas no log
+# Rota GET "/usuario", recebe dados de UsuarioInicio (apenas nome)
 @app.get("/usuario")
 def inicio(dados: UsuarioInicio):
-    # Instância local usada só para montar a mensagem de boas-vindas;
-    # não é salva em nenhuma variável global, então não afeta as demais rotas
+    # Cria um objeto Usuario apenas com o nome recebido
     usuario = Usuario(nome=dados.nome)
-    # Loga a mensagem de boas-vindas personalizada com o nome informado
+    # Registra no log uma mensagem de boas-vindas com o nome do usuário
     logging.info("Olá %s, seja bem vindo(a)!", usuario.nome)
 
-
-# Rota POST que recebe email e senha e efetua o cadastro do usuário
+# Rota POST "/usuario", usada para cadastrar um novo usuário
 @app.post("/usuario")
 def cadastro(dados: UsuarioCadastro):
+    # Extrai o email enviado no corpo da requisição
     email = dados.email
+    # Gera o hash da senha (com salt) usando bcrypt, para não guardar a senha em texto puro
     senha_hash = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
-    # Grava o cadastro no dicionário global usuario_cadastro, usando o email como
-    # chave e uma instância de Usuario como valor (nome não é informado aqui,
-    # então permanece None); login() e perfil() leem os dados a partir desse
-    # mesmo dicionário global, buscando pela chave email
+    # Declara que a variável usuario_cadastro usada aqui é a global definida acima
     global usuario_cadastro
+    # Cria um novo objeto Usuario com email e senha (hash); nome fica None
     novo_usuario = Usuario(nome=None, email=email, senha=senha_hash)
+    # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
-    # Confirma o cadastro para quem chamou a rota
+    # Retorna uma mensagem confirmando o cadastro
     return {"mensagem": "Cadastro realizado com sucesso!"}
 
-# Rota POST para autenticação, recebe email e senha no corpo da requisição
+# Rota POST "/login", usada para autenticar um usuário já cadastrado
 @app.post("/login")
 def login(dados: UsuarioLogin):
+    # Extrai o email enviado no corpo da requisição
     email_login = dados.email
+    # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-
-    
-    # Compara os dados recebidos com os dados salvos em usuario_cadastro (definidos
-    # em cadastro()). Se o email não estiver cadastrado, usuario_cadastro[email_login]
-    # levanta KeyError, pois usuario_cadastro é um dicionário vazio por padrão
+    # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
     if email_login == usuario_cadastro[email_login].email and bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
-        # Credenciais conferem: loga sucesso no login
-        logging.info("Login realizado com sucesso!")
+        # Gera um token JWT contendo o email, assinado com a SECRET_KEY usando o algoritmo HS256
+        jtoken = jwt.encode({"email": email_login}, SECRET_KEY, algorithm="HS256")
+        # Retorna mensagem de sucesso junto com o token gerado
+        return{"mensagem": "Login realizado com sucesso!", "token": jtoken}
     else:
-        # Credenciais não conferem: loga aviso de credenciais inválidas
-        logging.warning("Credenciais inválidas!")
+        # Caso email/senha não confiram, retorna mensagem de credenciais inválidas
+        return {"mensagem": "Credenciais inválidas!"}
 
-# Rota GET para exibir o perfil do usuário
+# Rota GET "/perfil/{email}", recebe o email como parâmetro da URL
 @app.get("/perfil/{email}")
 def perfil(email: str):
-
-    # email vem do path da URL (/perfil/{email}) e é usado para buscar o usuário
-    # em usuario_cadastro (definidos em cadastro()). Se o email não estiver
-    # cadastrado, a busca abaixo levanta KeyError. Como cadastro() nunca define
-    # o nome, o campo "nome" logado abaixo sempre aparece como None
-
+    # Registra no log que o perfil está sendo acessado
     logging.info("Acessando o perfil do usuário...")
+    # Registra no log o nome do usuário correspondente ao email
     logging.info("nome: %s", usuario_cadastro[email].nome)
+    # Registra no log o email do usuário
     logging.info("Email: %s", usuario_cadastro[email].email)
-    # Apenas uma instrução textual no log; não interrompe nem finaliza a execução
+    # Retorna mensagem confirmando que o perfil foi carregado
     return {"mensagem": "Perfil finalizado com sucesso!"}
-
-# Fim do arquivo: não há bloco "__main__"; a aplicação deve ser iniciada
-# externamente, por exemplo com "uvicorn api:app --reload"
