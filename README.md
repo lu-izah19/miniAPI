@@ -9,12 +9,12 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 ## Status
 
-🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação (sem mais conflito de path), modelos Pydantic separados da classe de estado, não depende mais de `input()`/menu de terminal para rodar, salva a senha como hash (`bcrypt`) em vez de texto puro, e está em processo de migração do armazenamento de um único usuário (variável global) para múltiplos usuários (dicionário indexado por email). Ainda restam ajustes de autorização e persistência real em banco de dados (ver "Próximos passos").
+🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação, modelos Pydantic separados da classe de estado, salva a senha como hash (`bcrypt`), migrou o armazenamento para múltiplos usuários (dicionário indexado por email), e o `/login` já gera um token JWT assinado (`SECRET_KEY` guardada em `.env`, fora do código). Falta usar esse token para proteger a rota `/perfil` — hoje ela ainda aceita o email direto na URL, sem checar autenticação. Persistência real em banco de dados também segue pendente (ver "Próximos passos").
 
 ## Funcionalidades
 
 - Cadastro de usuário (nome, email e senha)
-- Login com verificação de credenciais
+- Login com verificação de credenciais e geração de token JWT
 - Visualização de perfil do usuário logado
 - Registro de eventos via `logging` (início da aplicação, boas-vindas, tentativas de login, opções inválidas)
 
@@ -24,6 +24,8 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
 - [Pydantic](https://docs.pydantic.dev/) *(validação de dados de entrada na versão API)*
 - [bcrypt](https://pypi.org/project/bcrypt/) *(hash de senhas na versão API)*
+- [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT)*
+- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento da `SECRET_KEY` a partir de `.env`)*
 - Módulo `logging` da biblioteca padrão
 
 ## Versão terminal
@@ -56,10 +58,18 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 | `GET` | `/` | Rota inicial, mensagem de boas-vindas |
 | `GET` | `/usuario` | Boas-vindas personalizada com o nome do usuário |
 | `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha) |
-| `POST` | `/login` | Login do usuário (email e senha) |
-| `GET` | `/perfil` | Visualização de perfil do usuário logado |
+| `POST` | `/login` | Login do usuário (email e senha), retorna token JWT |
+| `GET` | `/perfil/{email}` | Visualização de perfil do usuário *(ainda sem checagem de autenticação)* |
 
 > Cada ação passou a ter seu próprio path (`/usuario`, `/login`, `/perfil`), o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
+
+### Configuração necessária
+
+A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. Ela deve ser definida em um arquivo `.env` na raiz do projeto (não incluído no repositório):
+
+```
+SECRET_KEY=<string aleatória gerada com secrets.token_hex(32)>
+```
 
 ### Como rodar
 
@@ -75,19 +85,21 @@ http://127.0.0.1:8000/docs
 
 ### Próximos passos
 
-- [ ] Finalizar a migração de `usuario_cadastro` para dicionário: `cadastro()` já grava por email (`usuario_cadastro[email] = novo_usuario`), mas `login()` e `perfil()` ainda usam a sintaxe antiga de objeto único (`usuario_cadastro.email`) e precisam ser ajustados para buscar o usuário certo dentro do dicionário
-- [ ] Definir o formato de armazenamento definitivo dos dados de usuário (orientação da supervisora) — dicionário em memória é um passo intermediário; avaliar se o destino final é banco de dados
-- [ ] Estruturar autorização de perfil de usuário
+- [ ] Proteger a rota `/perfil` para exigir o token JWT (via header `Authorization: Bearer`), em vez de aceitar o email diretamente na URL
+- [ ] Extrair o email de dentro do token decodificado, em vez de receber como parâmetro de rota
+- [ ] Tratar tokens inválidos/expirados com resposta 401
+- [ ] Definir o formato de armazenamento definitivo dos dados de usuário (orientação da supervisora: dicionário em memória, sem previsão de migração para banco de dados por ora)
 
 ### Resolvido recentemente
 
-- [x] Implementado hash de senha com `bcrypt` (`hashpw`/`gensalt` no cadastro, `checkpw` no login) — senha nunca mais é salva ou comparada em texto puro; testado com login válido e inválido
-- [x] Iniciada a migração de `usuario_cadastro` de variável única para dicionário (`{}`), permitindo múltiplos usuários cadastrados ao mesmo tempo — `cadastro()` já ajustado
+- [x] Implementada geração de token JWT no `/login` (`jwt.encode`, assinado com `SECRET_KEY` carregada via `.env`/`python-dotenv`)
+- [x] Removido `import email` desnecessário, que colidia silenciosamente com a variável local `email` usada nas rotas
+- [x] Implementado hash de senha com `bcrypt` (`hashpw`/`gensalt` no cadastro, `checkpw` no login) — senha nunca mais é salva ou comparada em texto puro
+- [x] Migração de `usuario_cadastro` de variável única para dicionário (`{}`), permitindo múltiplos usuários cadastrados ao mesmo tempo
 - [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario`, em vez de escrever/ler diretamente em atributos de classe
+- [x] Migrado `/perfil` de rota GET-com-corpo para GET-com-path-param (`/perfil/{email}`), alinhado com convenção REST
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
-- [x] Removida a chamada de `inicio()` no final do arquivo (conflitava com o modelo de servidor do `uvicorn`)
 - [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`) separados da classe `Usuario`, que guarda o estado em memória
-- [x] Corrigido o `__init__` de `Usuario` (faltava `self.` nos atributos)
 - [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
 
 ## Aprendizados do projeto
@@ -99,6 +111,9 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Por que gravar em atributo de classe (`Classe.atributo = valor`) compartilha o dado entre todas as instâncias/requisições, e por que isso é um anti-padrão para estado por usuário
 - Por que uma única variável global (mesmo guardando uma instância corretamente) só suporta um usuário por vez, e como um dicionário indexado por uma chave única (email) resolve isso
 - Hash de senhas com `bcrypt`: por que é irreversível, por que usa salt, e por que a verificação (`checkpw`) nunca "descriptografa" a senha salva
+- Autenticação vs. autorização: "quem você é" vs. "o que você pode fazer/ver"
+- Estrutura e propósito de um JWT (header, payload, signature) e por que ele permite autenticação stateless
+- Por que segredos (como a `SECRET_KEY`) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`), path parameters e por que cada combinação verbo+path deve representar uma única ação
