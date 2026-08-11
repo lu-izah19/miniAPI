@@ -1,3 +1,5 @@
+import email
+
 from fastapi import FastAPI
 # Módulo padrão de logging, usado no lugar de print() para as mensagens de status/erro
 import logging
@@ -24,8 +26,9 @@ menu = """
 """
 
 # Classe genérica para guardar os dados de um usuário (nome, email, senha).
-# É usada tanto para a instância local descartável de inicio() quanto para o
-# objeto global usuario_cadastro, preenchido em cadastro() e lido em login() e perfil()
+# É usada tanto para a instância local descartável de inicio() quanto para os
+# objetos guardados no dicionário global usuario_cadastro, preenchidos em
+# cadastro() e lidos em login() e perfil()
 class Usuario:
     # Todos os campos são opcionais para permitir montar o objeto com dados parciais
     # (ex: inicio() usa só o nome; cadastro() usa só email e senha)
@@ -35,7 +38,7 @@ class Usuario:
         self.senha = senha
 
 usuario_cadastro = {}
-# Variável global para armazenar o usuário cadastrado 
+# Dicionário global que guarda os usuários cadastrados, indexados pelo email
 
 # Modelo de validação do corpo da requisição de cadastro (POST /usuario)
 class UsuarioCadastro(BaseModel):
@@ -52,7 +55,8 @@ class UsuarioLogin(BaseModel):
     email: str
     senha: str
 
-# Modelo de validação do corpo da requisição de perfil (GET /perfil)
+# Modelo não utilizado atualmente: a rota GET /perfil/{email} passou a receber
+# o email como parâmetro de path (veja perfil()), em vez de um corpo de requisição
 class UsuarioPerfil(BaseModel):
     nome: str
     email: str
@@ -72,9 +76,10 @@ def inicio(dados: UsuarioInicio):
 def cadastro(dados: UsuarioCadastro):
     email = dados.email
     senha_hash = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
-    # Grava o cadastro na variável global usuario_cadastro, como uma instância de
-    # Usuario (nome não é informado aqui, então permanece None); login() e perfil()
-    # leem os dados a partir dessa mesma variável global
+    # Grava o cadastro no dicionário global usuario_cadastro, usando o email como
+    # chave e uma instância de Usuario como valor (nome não é informado aqui,
+    # então permanece None); login() e perfil() leem os dados a partir desse
+    # mesmo dicionário global, buscando pela chave email
     global usuario_cadastro
     novo_usuario = Usuario(nome=None, email=email, senha=senha_hash)
     usuario_cadastro[email] = novo_usuario
@@ -89,8 +94,8 @@ def login(dados: UsuarioLogin):
 
     
     # Compara os dados recebidos com os dados salvos em usuario_cadastro (definidos
-    # em cadastro()). Se nenhum cadastro tiver sido feito ainda, usuario_cadastro
-    # continua None e esta linha levanta AttributeError
+    # em cadastro()). Se o email não estiver cadastrado, usuario_cadastro[email_login]
+    # levanta KeyError, pois usuario_cadastro é um dicionário vazio por padrão
     if email_login == usuario_cadastro[email_login].email and bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
         # Credenciais conferem: loga sucesso no login
         logging.info("Login realizado com sucesso!")
@@ -99,19 +104,19 @@ def login(dados: UsuarioLogin):
         logging.warning("Credenciais inválidas!")
 
 # Rota GET para exibir o perfil do usuário
-@app.get("/perfil")
-def perfil(dados: UsuarioPerfil):
+@app.get("/perfil/{email}")
+def perfil(email: str):
 
-    # Os dados exibidos abaixo vêm de usuario_cadastro (definidos em cadastro());
-    # o parâmetro "dados" recebido pela rota não é utilizado. Como cadastro() nunca
-    # define o nome, o campo "nome" logado abaixo sempre aparece como None
+    # email vem do path da URL (/perfil/{email}) e é usado para buscar o usuário
+    # em usuario_cadastro (definidos em cadastro()). Se o email não estiver
+    # cadastrado, a busca abaixo levanta KeyError. Como cadastro() nunca define
+    # o nome, o campo "nome" logado abaixo sempre aparece como None
 
     logging.info("Acessando o perfil do usuário...")
-    logging.info("nome: %s", usuario_cadastro[usuario_cadastro.email].nome)
-    logging.info("Email: %s", usuario_cadastro.email)
+    logging.info("nome: %s", usuario_cadastro[email].nome)
+    logging.info("Email: %s", usuario_cadastro[email].email)
     # Apenas uma instrução textual no log; não interrompe nem finaliza a execução
-    logging.info("Para sair do perfil, digite 4.")
+    return {"mensagem": "Perfil finalizado com sucesso!"}
 
 # Fim do arquivo: não há bloco "__main__"; a aplicação deve ser iniciada
 # externamente, por exemplo com "uvicorn api:app --reload"
-
