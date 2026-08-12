@@ -9,14 +9,16 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 ## Status
 
-🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação, modelos Pydantic separados da classe de estado, salva a senha como hash (`bcrypt`), migrou o armazenamento para múltiplos usuários (dicionário indexado por email), e o `/login` já gera um token JWT assinado (`SECRET_KEY` guardada em `.env`, fora do código). Falta usar esse token para proteger a rota `/perfil` — hoje ela ainda aceita o email direto na URL, sem checar autenticação. Persistência real em banco de dados também segue pendente (ver "Próximos passos").
+🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação, modelos Pydantic separados da classe de estado, salva a senha como hash (`bcrypt`), migrou o armazenamento para múltiplos usuários (dicionário indexado por email), e o `/login` já gera um token JWT assinado (`SECRET_KEY` guardada em `.env`, fora do código). A rota `/perfil` já está protegida por token JWT (`Authorization: Bearer`), sem mais aceitar o email diretamente na URL, e trata token inválido/expirado com 401. O `/login` também trata email inexistente (404) e senha incorreta (401). Foi adicionada autorização por papel (`user`/`admin`): o cadastro define `"user"` por padrão, o login exige que o papel escolhido bata com o papel salvo (403 se não bater), e existe uma rota `/admin` que só usuários com papel `"admin"` conseguem acessar (403 para quem não é admin). Persistência real em banco de dados segue pendente, mas já é uma decisão consciente (ver "Próximos passos").
 
 ## Funcionalidades
 
-- Cadastro de usuário (nome, email e senha)
-- Login com verificação de credenciais e geração de token JWT
-- Visualização de perfil do usuário logado
-- Registro de eventos via `logging` (início da aplicação, boas-vindas, tentativas de login, opções inválidas)
+- Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
+- Login com verificação de credenciais, escolha/confirmação de papel e geração de token JWT
+- Visualização de perfil do usuário logado, protegida por token JWT
+- Rota administrativa (`/admin`), acessível apenas para usuários com papel `"admin"`
+- Tratamento de erros HTTP específicos: 404 (email não encontrado), 401 (senha ou token inválido), 403 (papel inválido ou sem permissão)
+- Registro de eventos via `logging` (início da aplicação, boas-vindas, acesso a rotas protegidas)
 
 ## Tecnologias utilizadas
 
@@ -57,11 +59,12 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 |--------|------|-----------|
 | `GET` | `/` | Rota inicial, mensagem de boas-vindas |
 | `GET` | `/usuario` | Boas-vindas personalizada com o nome do usuário |
-| `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha) |
-| `POST` | `/login` | Login do usuário (email e senha), retorna token JWT |
-| `GET` | `/perfil/{email}` | Visualização de perfil do usuário *(ainda sem checagem de autenticação)* |
+| `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha; papel `"user"` por padrão) |
+| `POST` | `/login` | Login do usuário (email, senha e papel), retorna token JWT. 404 se o email não existir, 401 se a senha estiver errada, 403 se o papel escolhido não bater com o cadastrado |
+| `GET` | `/perfil` | Visualização de perfil do usuário logado, protegida por token JWT (`Authorization: Bearer`). 401 se o token for inválido/expirado |
+| `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"`. 401 se o token for inválido/expirado, 403 se o usuário não for admin |
 
-> Cada ação passou a ter seu próprio path (`/usuario`, `/login`, `/perfil`), o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
+> Cada ação passou a ter seu próprio path (`/usuario`, `/login`, `/perfil`, `/admin`), o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
 
 ### Configuração necessária
 
@@ -85,19 +88,24 @@ http://127.0.0.1:8000/docs
 
 ### Próximos passos
 
-- [ ] Proteger a rota `/perfil` para exigir o token JWT (via header `Authorization: Bearer`), em vez de aceitar o email diretamente na URL
-- [ ] Extrair o email de dentro do token decodificado, em vez de receber como parâmetro de rota
-- [ ] Tratar tokens inválidos/expirados com resposta 401
-- [ ] Definir o formato de armazenamento definitivo dos dados de usuário (orientação da supervisora: dicionário em memória, sem previsão de migração para banco de dados por ora)
+- [ ] Persistir os dados de usuário além da memória do processo (avaliar formato definitivo junto à supervisora, já que hoje a decisão consciente é dicionário em memória, sem migração para banco de dados por ora)
+- [ ] Avaliar mecanismo para alterar o papel de um usuário já cadastrado (hoje só é definido manualmente no dicionário, não existe rota para isso)
+- [ ] Expandir o conteúdo exclusivo da rota `/admin` (hoje ela devolve os mesmos dados de `/perfil`; falta decidir o que um admin deveria ver ou fazer de diferente)
 
 ### Resolvido recentemente
 
+- [x] Protegida a rota `/perfil` para exigir token JWT (via header `Authorization: Bearer`, com `HTTPBearer` + `Depends`), em vez de aceitar o email diretamente na URL
+- [x] Email extraído de dentro do token decodificado (`jwt.decode`), em vez de recebido como parâmetro de rota
+- [x] Tratamento de token inválido/expirado com resposta 401, usando `try`/`except` em torno do `jwt.decode`
+- [x] `/login` tratando email inexistente com 404 (`HTTPException`), em vez de deixar o `KeyError` estourar como erro 500
+- [x] `/login` tratando senha incorreta com 401
+- [x] Adicionado campo `papel` (`"user"` por padrão) na classe `Usuario` e no modelo `UsuarioLogin`
+- [x] `/login` agora exige que o papel informado bata com o papel salvo no cadastro, retornando 403 caso contrário
+- [x] Criada a rota `/admin`, restrita a usuários com papel `"admin"` (403 para quem não é admin), seguindo o mesmo padrão de autenticação via token da rota `/perfil`
 - [x] Implementada geração de token JWT no `/login` (`jwt.encode`, assinado com `SECRET_KEY` carregada via `.env`/`python-dotenv`)
-- [x] Removido `import email` desnecessário, que colidia silenciosamente com a variável local `email` usada nas rotas
 - [x] Implementado hash de senha com `bcrypt` (`hashpw`/`gensalt` no cadastro, `checkpw` no login) — senha nunca mais é salva ou comparada em texto puro
 - [x] Migração de `usuario_cadastro` de variável única para dicionário (`{}`), permitindo múltiplos usuários cadastrados ao mesmo tempo
 - [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario`, em vez de escrever/ler diretamente em atributos de classe
-- [x] Migrado `/perfil` de rota GET-com-corpo para GET-com-path-param (`/perfil/{email}`), alinhado com convenção REST
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
 - [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`) separados da classe `Usuario`, que guarda o estado em memória
 - [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
@@ -113,6 +121,13 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Hash de senhas com `bcrypt`: por que é irreversível, por que usa salt, e por que a verificação (`checkpw`) nunca "descriptografa" a senha salva
 - Autenticação vs. autorização: "quem você é" vs. "o que você pode fazer/ver"
 - Estrutura e propósito de um JWT (header, payload, signature) e por que ele permite autenticação stateless
+- Uso de `Depends` e `HTTPBearer` do FastAPI para extrair e validar o token do header `Authorization`, protegendo rotas sem depender de parâmetros na URL
+- `try`/`except` como estratégia para lidar com falhas que só podem ser detectadas na hora de executar (como decodificar um token inválido), em vez de checadas antecipadamente com `if`
+- Diferença entre `raise` (interrompe a execução e propaga um erro) e `return` (devolve um valor normalmente)
+- Uso de `HTTPException` para devolver códigos de status HTTP apropriados a cada tipo de falha (404, 401, 403), em vez de mensagens de erro genéricas com status 200
+- Diferença entre os códigos 401 (não autenticado) e 403 (autenticado, mas sem permissão)
+- Controle de acesso baseado em papel (role-based access control): por que o papel de um usuário deve ser definido no cadastro (pela aplicação) e nunca escolhido livremente pelo próprio usuário
+- Trade-off entre incluir dados como o papel dentro do payload do token (mais rápido, mas "engessado" até o token expirar) versus consultar a fonte de dados a cada requisição (mais lento, porém sempre atualizado)
 - Por que segredos (como a `SECRET_KEY`) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
