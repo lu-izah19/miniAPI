@@ -1,8 +1,11 @@
 # Importa a classe FastAPI, usada para criar a aplicação/API
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.security import HTTPBearer
 app = FastAPI()
 # Importa o módulo de logging, usado para registrar mensagens (info, erro, etc.)
 import logging
+# Importa HTTPException, usado para lançar exceções HTTP com códigos de status e mensagens
+from fastapi import HTTPException
 # Importa o módulo jwt (PyJWT), usado para gerar e validar tokens de autenticação
 import jwt
 # Importa o bcrypt, usado para gerar hash e verificar senhas de forma segura
@@ -31,10 +34,11 @@ def home():
 # Classe que representa um usuário internamente (não é um modelo do pydantic)
 class Usuario:
     # Construtor: define nome, email e senha, todos opcionais por padrão
-    def __init__(self, nome=None, email=None, senha=None):
-        self.nome = nome
-        self.email = email
-        self.senha = senha
+    def __init__(self, nome=None, email=None, senha=None, papel="user"):
+        self.nome = nome # Adiciona o atributo nome ao usuário
+        self.email = email # Adiciona o atributo email ao usuário
+        self.senha = senha # Adiciona o atributo senha ao usuário
+        self.papel = papel # Adiciona o atributo papel ao usuário
 
 # Dicionário usado como "banco de dados" em memória, indexado pelo email do usuário
 usuario_cadastro = {}
@@ -53,6 +57,7 @@ class UsuarioInicio(BaseModel):
 class UsuarioLogin(BaseModel):
     email: str
     senha: str
+    papel: str = "user"  # Define o papel do usuário como "user" por padrão
 
 # Modelo de dados usado para representar o perfil do usuário (nome e email)
 class UsuarioPerfil(BaseModel):
@@ -77,7 +82,7 @@ def cadastro(dados: UsuarioCadastro):
     # Declara que a variável usuario_cadastro usada aqui é a global definida acima
     global usuario_cadastro
     # Cria um novo objeto Usuario com email e senha (hash); nome fica None
-    novo_usuario = Usuario(nome=None, email=email, senha=senha_hash)
+    novo_usuario = Usuario(nome=None, email=email, senha=senha_hash, papel="user")
     # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
     # Retorna uma mensagem confirmando o cadastro
@@ -90,24 +95,61 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-    # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
-    if email_login == usuario_cadastro[email_login].email and bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
-        # Gera um token JWT contendo o email, assinado com a SECRET_KEY usando o algoritmo HS256
-        jtoken = jwt.encode({"email": email_login}, SECRET_KEY, algorithm="HS256")
-        # Retorna mensagem de sucesso junto com o token gerado
-        return{"mensagem": "Login realizado com sucesso!", "token": jtoken}
-    else:
-        # Caso email/senha não confiram, retorna mensagem de credenciais inválidas
-        return {"mensagem": "Credenciais inválidas!"}
+    # Extrai o papel enviado no corpo da requisição
+    papel_login = dados.papel
 
-# Rota GET "/perfil/{email}", recebe o email como parâmetro da URL
-@app.get("/perfil/{email}")
-def perfil(email: str):
+    
+    # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
+    if email_login in usuario_cadastro:
+        # Verifica se o email e a senha conferem com os dados cadastrados
+        if bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
+            # Verifica se o papel do usuário é válido (existe no cadastro)
+            if papel_login == usuario_cadastro[email_login].papel:
+                # Gera um token JWT contendo o email, assinado com a SECRET_KEY usando o algoritmo HS256
+                jtoken = jwt.encode({"email": email_login}, SECRET_KEY, algorithm="HS256")
+                # Retorna mensagem de sucesso junto com o token gerado
+                return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
+            else:
+                    # Caso o papel do usuário não seja válido, retorna mensagem de erro
+                    raise HTTPException(status_code=403, detail="Papel de usuário inválido!")
+        else:
+            # Caso a senha não confira, retorna mensagem de senha incorreta
+            raise HTTPException(status_code=401, detail="Senha incorreta!")
+    else:
+        # Caso email/senha não confiram, retorna mensagem de erro de login
+        raise HTTPException(status_code=404, detail="Email incorreto!")
+
+@app.get("/admin")
+def admin(credenciais = Depends(HTTPBearer())):
+    logging.info("Acessando a rota de administração...")
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+        if usuario_cadastro[payload["email"]].papel == "admin":
+            # Retorna o nome e email do usuário, obtidos a partir do payload do token
+            return {"nome" : usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
+        else: 
+            # Caso o usuário não seja administrador, retorna erro de acesso negado
+            raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+        
+    except:
+        # Caso o token seja inválido ou tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado!")
+    
+
+# Rota GET "/perfil", protegida por autenticação via token JWT
+@app.get("/perfil")
+def perfil(credenciais = Depends(HTTPBearer())):
     # Registra no log que o perfil está sendo acessado
     logging.info("Acessando o perfil do usuário...")
-    # Registra no log o nome do usuário correspondente ao email
-    logging.info("nome: %s", usuario_cadastro[email].nome)
-    # Registra no log o email do usuário
-    logging.info("Email: %s", usuario_cadastro[email].email)
-    # Retorna mensagem confirmando que o perfil foi carregado
-    return {"mensagem": "Perfil finalizado com sucesso!"}
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+        # Retorna o nome e email do usuário, obtidos a partir do payload do token
+        return {"nome" : usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
+    except:
+        # Caso o token seja inválido ou tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado!")
+   
+
