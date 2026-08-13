@@ -13,8 +13,6 @@ O projeto contém duas versões, que representam etapas diferentes do aprendizad
 
 Foi adicionada autorização por papel (`user`/`admin`): o cadastro define `"user"` por padrão, e o papel **não é mais informado no login** — o `/login` busca o papel diretamente do cadastro e o inclui dentro do token JWT gerado, já que essa informação já existe desde o cadastro e não faz sentido pedir de novo. A rota `/admin` é restrita a usuários com papel `"admin"` (403 para quem não é) e agora tem conteúdo próprio: retorna a lista de **todos os usuários cadastrados** (nome e email de cada um), sem expor senha nem papel.
 
-Persistência real em banco de dados segue pendente, mas já é uma decisão consciente (ver "Próximos passos").
-
 ## Funcionalidades
 
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
