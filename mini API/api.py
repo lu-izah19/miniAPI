@@ -57,7 +57,6 @@ class UsuarioInicio(BaseModel):
 class UsuarioLogin(BaseModel):
     email: str
     senha: str
-    papel: str = "user"  # Define o papel do usuário como "user" por padrão
 
 # Modelo de dados usado para representar o perfil do usuário (nome e email)
 class UsuarioPerfil(BaseModel):
@@ -81,7 +80,7 @@ def cadastro(dados: UsuarioCadastro):
     senha_hash = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
     # Declara que a variável usuario_cadastro usada aqui é a global definida acima
     global usuario_cadastro
-    # Cria um novo objeto Usuario com email e senha (hash); nome fica None
+    # Cria um novo objeto Usuario com o nome, email, senha hash e papel "user"
     novo_usuario = Usuario(nome=None, email=email, senha=senha_hash, papel="user")
     # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
@@ -95,23 +94,16 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-    # Extrai o papel enviado no corpo da requisição
-    papel_login = dados.papel
 
     
     # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
     if email_login in usuario_cadastro:
         # Verifica se o email e a senha conferem com os dados cadastrados
         if bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
-            # Verifica se o papel do usuário é válido (existe no cadastro)
-            if papel_login == usuario_cadastro[email_login].papel:
-                # Gera um token JWT contendo o email, assinado com a SECRET_KEY usando o algoritmo HS256
-                jtoken = jwt.encode({"email": email_login}, SECRET_KEY, algorithm="HS256")
-                # Retorna mensagem de sucesso junto com o token gerado
-                return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
-            else:
-                    # Caso o papel do usuário não seja válido, retorna mensagem de erro
-                    raise HTTPException(status_code=403, detail="Papel de usuário inválido!")
+            # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY usando o algoritmo HS256
+            jtoken = jwt.encode({"email": email_login, "papel": usuario_cadastro[email_login].papel}, SECRET_KEY, algorithm="HS256")
+            # Retorna mensagem de sucesso junto com o token gerado
+            return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
         else:
             # Caso a senha não confira, retorna mensagem de senha incorreta
             raise HTTPException(status_code=401, detail="Senha incorreta!")
@@ -127,8 +119,11 @@ def admin(credenciais = Depends(HTTPBearer())):
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
         if usuario_cadastro[payload["email"]].papel == "admin":
-            # Retorna o nome e email do usuário, obtidos a partir do payload do token
-            return {"nome" : usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
+            lista_usuarios = []
+            # Se o usuário for administrador, retorna o nome e email do usuário
+            for chave_secreta in usuario_cadastro:
+                lista_usuarios.append({"nome": usuario_cadastro[chave_secreta].nome, "email": usuario_cadastro[chave_secreta].email})
+            return {"usuarios": lista_usuarios}
         else: 
             # Caso o usuário não seja administrador, retorna erro de acesso negado
             raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
@@ -151,5 +146,3 @@ def perfil(credenciais = Depends(HTTPBearer())):
     except:
         # Caso o token seja inválido ou tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido ou expirado!")
-   
-
