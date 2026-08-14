@@ -63,6 +63,20 @@ class UsuarioPerfil(BaseModel):
     nome: str
     email: str
 
+# Modelo de dados usado para alterar o papel do usuário (email e novo papel)
+class AlterarPapel(BaseModel):
+    email: str
+    papel: str
+
+# Modelo de dados esperado no corpo da requisição de deleção de usuário
+class UsuarioDelete(BaseModel):
+    email: str
+
+# Modelo de dados esperado no corpo da requisição de alteração de senha
+class UsuarioSenha(BaseModel):
+    email: str
+    senha: str
+
 # Rota GET "/usuario", recebe dados de UsuarioInicio (apenas nome)
 @app.get("/usuario")
 def inicio(dados: UsuarioInicio):
@@ -81,7 +95,7 @@ def cadastro(dados: UsuarioCadastro):
     # Declara que a variável usuario_cadastro usada aqui é a global definida acima
     global usuario_cadastro
     # Cria um novo objeto Usuario com o nome, email, senha hash e papel "user"
-    novo_usuario = Usuario(nome=None, email=email, senha=senha_hash, papel="user")
+    novo_usuario = Usuario(nome=dados.nome, email=email, senha=senha_hash, papel="user")
     # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
     # Retorna uma mensagem confirmando o cadastro
@@ -94,8 +108,6 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-
-    
     # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
     if email_login in usuario_cadastro:
         # Verifica se o email e a senha conferem com os dados cadastrados
@@ -111,27 +123,158 @@ def login(dados: UsuarioLogin):
         # Caso email/senha não confiram, retorna mensagem de erro de login
         raise HTTPException(status_code=404, detail="Email incorreto!")
 
+# Rota GET "/admin", protegida por autenticação via token JWT
 @app.get("/admin")
 def admin(credenciais = Depends(HTTPBearer())):
     logging.info("Acessando a rota de administração...")
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
-        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-        if usuario_cadastro[payload["email"]].papel == "admin":
-            lista_usuarios = []
-            # Se o usuário for administrador, retorna o nome e email do usuário
-            for chave_secreta in usuario_cadastro:
-                lista_usuarios.append({"nome": usuario_cadastro[chave_secreta].nome, "email": usuario_cadastro[chave_secreta].email})
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+    if usuario_cadastro[payload["email"]].papel == "admin":
+        lista_usuarios = []
+        # Se o usuário for administrador, retorna o nome e email do usuário
+        for chave_secreta in usuario_cadastro:
+            lista_usuarios.append({"nome": usuario_cadastro[chave_secreta].nome, "email": usuario_cadastro[chave_secreta].email})
             return {"usuarios": lista_usuarios}
+    else: 
+        # Caso o usuário não seja administrador, retorna erro de acesso negado
+        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+
+# Rota PATCH "/admin/papel", usada para alterar o papel de um usuário específico
+@app.patch("/admin/papel")
+def alterar_papel(dados: AlterarPapel, credenciais = Depends(HTTPBearer())):
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+    if usuario_cadastro[payload["email"]].papel == "admin":
+        if dados.email in usuario_cadastro:
+            # Altera o papel do usuário especificado no corpo da requisição
+            usuario = usuario_cadastro[dados.email]
+            usuario.papel = dados.papel
+            # Registra que o papel do usuário foi alterado 
+            return {"mensagem": "Papel de usuário alterado!", "papel": usuario.papel}
         else: 
-            # Caso o usuário não seja administrador, retorna erro de acesso negado
-            raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
-        
-    except:
-        # Caso o token seja inválido ou tenha expirado, retorna erro de autenticação
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado!")
-    
+            # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+            raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+    else:
+        # Caso o usuário não seja administrador, retorna erro de acesso negado
+        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+
+# Rota DELETE "/admin/usuario", usada para deletar um usuário específico
+@app.delete("/admin/usuario")
+def deletar_usuario(dados: UsuarioDelete, credenciais = Depends(HTTPBearer())):
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+     # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+    if usuario_cadastro[payload["email"]].papel == "admin":
+        if dados.email in usuario_cadastro:
+            # Deleta o usuário especificado no corpo da requisição
+            del usuario_cadastro[dados.email]
+            # Registra que o usuário foi deletado
+            return {"mensagem": "Usuário deletado com sucesso!"}
+        else: 
+            # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+            raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+    else:
+        # Caso o usuário não seja administrador, retorna erro de acesso negado
+        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+
+# Rota PATCH "/perfil/usuario", usada para alterar o perfil do usuário autenticado
+@app.patch("/perfil/usuario")
+def alterar_perfil(dados: UsuarioCadastro, credenciais = Depends(HTTPBearer())):
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+    # Verifica se o email enviado no corpo da requisição já está em uso por outro usuário
+    if dados.email in usuario_cadastro and dados.email != payload["email"]:
+        # Caso o email já esteja em uso, retorna erro de conflito
+        raise HTTPException(status_code=409, detail="Email já está em uso!")
+    # Atualiza os dados do usuário no dicionário de cadastro
+    usuario = usuario_cadastro[payload["email"]]
+    usuario.nome = dados.nome
+    usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+    # Se o email foi alterado, atualiza a chave no dicionário de cadastro
+    if dados.email != payload["email"]:
+        usuario.email = dados.email
+        usuario_cadastro[dados.email] = usuario
+        del usuario_cadastro[payload["email"]]
+    # Retorna mensagem de sucesso após a alteração do perfil   
+    return {"mensagem": "Perfil alterado com sucesso!"}
+
+# Rota PATCH "/admin/usuario", usada para alterar a senha de um usuário específico
+@app.patch("/admin/usuario")
+def alterar_senha(dados: UsuarioSenha, credenciais = Depends(HTTPBearer())):
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+    if usuario_cadastro[payload["email"]].papel == "admin":
+        if dados.email in usuario_cadastro:
+            # Altera a senha do usuário especificado no corpo da requisição
+            usuario = usuario_cadastro[dados.email]
+            usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+            # Registra que a senha do usuário foi alterada
+            return {"mensagem": "Senha de usuário alterada!"}
+        else: 
+            # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+            raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+    else:
+        # Caso o usuário não seja administrador, retorna erro de acesso negado
+        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+
+# Rota DELETE "/perfil/usuario", usada para deletar o perfil do usuário autenticado
+@app.delete("/perfil/usuario")
+def deletar_usuario(credenciais = Depends(HTTPBearer())):
+    try:
+        # Extrai o token JWT do cabeçalho Authorization (Bearer)
+        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
+    if payload["email"] in usuario_cadastro:
+        # Deleta o usuário especificado no corpo da requisição
+        del usuario_cadastro[payload["email"]]
+        # Registra que o usuário foi deletado
+        return {"mensagem": "Usuário deletado com sucesso!"}
+    else: 
+        # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+        raise HTTPException(status_code=404, detail="Usuário não encontrado!")
 
 # Rota GET "/perfil", protegida por autenticação via token JWT
 @app.get("/perfil")
@@ -143,6 +286,9 @@ def perfil(credenciais = Depends(HTTPBearer())):
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
         # Retorna o nome e email do usuário, obtidos a partir do payload do token
         return {"nome" : usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
-    except:
-        # Caso o token seja inválido ou tenha expirado, retorna erro de autenticação
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado!")
+    except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token expirado!")
+    except jwt.InvalidTokenError:
+        # Caso o token seja inválido, retorna erro de autenticação
+        raise HTTPException(status_code=401, detail="Token inválido!")
