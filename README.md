@@ -1,22 +1,14 @@
 # miniAPI
-
 Projeto de estudo desenvolvido durante o estágio em desenvolvimento back end, com o objetivo de praticar lógica de programação em Python e, na sequência, os fundamentos de desenvolvimento de APIs com **FastAPI**.
-
 O projeto contém duas versões, que representam etapas diferentes do aprendizado:
-
 - **Versão terminal** — um sistema de cadastro, login e perfil de usuário rodando via linha de comando.
 - **Versão API** *(em andamento)* — adaptação do mesmo sistema para rodar como uma API web usando FastAPI.
-
 ## Status
-
 🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação, modelos Pydantic separados da classe de estado, salva a senha como hash (`bcrypt`), migrou o armazenamento para múltiplos usuários (dicionário indexado por email), e o `/login` já gera um token JWT assinado (`SECRET_KEY` guardada em `.env`, fora do código). A rota `/perfil` já está protegida por token JWT (`Authorization: Bearer`), sem mais aceitar o email diretamente na URL, e trata token inválido/expirado com 401. O `/login` também trata email inexistente (404) e senha incorreta (401).
-
 Foi adicionada autorização por papel (`user`/`admin`): o cadastro define `"user"` por padrão, e o papel **não é mais informado no login** — o `/login` busca o papel diretamente do cadastro e o inclui dentro do token JWT gerado, já que essa informação já existe desde o cadastro e não faz sentido pedir de novo. A rota `/admin` é restrita a usuários com papel `"admin"` (403 para quem não é) e tem conteúdo próprio: retorna a lista de **todos os usuários cadastrados** (nome e email de cada um), sem expor senha nem papel.
-
 A API agora também cobre um CRUD mais completo de administração e de autogerenciamento de conta: um admin pode alterar o papel de qualquer usuário, excluir um usuário e resetar a senha de alguém que esqueceu; qualquer usuário logado pode editar o próprio perfil (nome, email e senha) ou deletar a própria conta. O tratamento de exceções de token também ficou mais específico: em vez de um `except:` genérico (que podia "engolir" até um `HTTPException` de 403 lançado dentro do mesmo `try`), agora cada rota protegida usa `except jwt.ExpiredSignatureError` e `except jwt.InvalidTokenError` separados, e a lógica de autorização (checar papel) ficou fora do bloco `try`, garantindo que 401 (token inválido) e 403 (sem permissão) nunca se confundam.
-
+O email do usuário agora é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica) dentro do objeto `Usuario`, diferente da senha (hash `bcrypt`, irreversível). O dicionário `usuario_cadastro` continua indexado pelo email em texto puro (necessário, já que a criptografia gera um resultado diferente a cada execução), enquanto o campo `.email` guardado dentro de cada objeto `Usuario` fica sempre criptografado, sendo descriptografado apenas nas rotas que precisam devolvê-lo (como `/admin`).
 ## Funcionalidades
-
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
 - Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login)
 - Visualização de perfil do usuário logado, protegida por token JWT
@@ -28,86 +20,65 @@ A API agora também cobre um CRUD mais completo de administração e de autogere
 - Reset de senha de qualquer usuário por um admin (fluxo de "esqueci minha senha")
 - Tratamento de erros HTTP específicos: 404 (usuário não encontrado), 401 (senha, token inválido ou expirado), 403 (sem permissão de admin), 409 (email já em uso)
 - Registro de eventos via `logging` (início da aplicação, boas-vindas, acesso a rotas protegidas)
-
+- Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
 ## Tecnologias utilizadas
-
 - Python 3
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
 - [Pydantic](https://docs.pydantic.dev/) *(validação de dados de entrada na versão API)*
 - [bcrypt](https://pypi.org/project/bcrypt/) *(hash de senhas na versão API)*
 - [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT)*
-- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento da `SECRET_KEY` a partir de `.env`)*
+- [cryptography](https://cryptography.io/) *(criptografia simétrica reversível do email, via `Fernet`)*
+- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY` e `FERNET_KEY` a partir de `.env`)*
 - Módulo `logging` da biblioteca padrão
-
 ## Versão terminal
-
 Sistema com menu interativo no terminal, controlado por um loop `while True` com estrutura `if/elif/else`. Os dados do usuário são armazenados em memória durante a execução (sem persistência em banco de dados).
-
 ### Como rodar
-
 ```bash
 python terminal.py
 ```
-
 O programa vai pedir seu nome e, em seguida, exibir um menu com as opções:
-
 ```
 1. Cadastro
 2. Login
 3. Perfil
 4. Sair
 ```
-
 ## Versão API *(em andamento)*
-
 Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como parte do aprendizado de desenvolvimento de APIs REST.
-
 ### Rotas definidas até o momento
-
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/` | Rota inicial, mensagem de boas-vindas |
-| `GET` | `/usuario` | Boas-vindas personalizada com o nome do usuário |
-| `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha; papel `"user"` por padrão) |
+| `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha; papel `"user"` por padrão). O email é criptografado antes de ser salvo no objeto `Usuario` |
 | `POST` | `/login` | Login do usuário (email e senha). O papel é obtido do cadastro e incluído no token JWT gerado. 404 se o email não existir, 401 se a senha estiver errada |
 | `GET` | `/perfil` | Visualização de perfil do usuário logado, protegida por token JWT (`Authorization: Bearer`). 401 se o token for inválido/expirado |
-| `PATCH` | `/perfil/usuario` | Edição do próprio perfil (nome, email e senha), protegida por token JWT. O usuário editado é sempre o dono do token (nunca um email vindo do corpo). 409 se o novo email já pertencer a outro usuário |
+| `PATCH` | `/perfil/usuario` | Edição do próprio perfil (nome, email e senha), protegida por token JWT. O usuário editado é sempre o dono do token (nunca um email vindo do corpo). 409 se o novo email já pertencer a outro usuário. Se o email for alterado, o novo é criptografado antes de ser salvo |
 | `DELETE` | `/perfil/usuario` | Exclusão da própria conta, protegida por token JWT. Não recebe nada no corpo — o usuário deletado é sempre o dono do token |
-| `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"`. Retorna a lista de todos os usuários cadastrados (nome e email, sem senha). 401 se o token for inválido/expirado, 403 se o usuário não for admin |
+| `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"`. Retorna a lista de todos os usuários cadastrados (nome e email descriptografado, sem senha). 401 se o token for inválido/expirado, 403 se o usuário não for admin |
 | `PATCH` | `/admin/papel` | Altera o papel (`user`/`admin`) de um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `DELETE` | `/admin/usuario` | Exclui um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `PATCH` | `/admin/usuario` | Reseta a senha de um usuário especificado por email (fluxo de "esqueci minha senha"). Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
-
 > Cada ação tem seu próprio path, o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
-
 ### Configuração necessária
-
-A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. Ela deve ser definida em um arquivo `.env` na raiz do projeto (não incluído no repositório):
-
+A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. A criptografia do email depende de uma variável `FERNET_KEY`, usada para criptografar/descriptografar esse dado em repouso. Ambas devem ser definidas em um arquivo `.env` na raiz do projeto (não incluído no repositório):
 ```
 SECRET_KEY=<string aleatória gerada com secrets.token_hex(32)>
+FERNET_KEY=<chave gerada com Fernet.generate_key()>
 ```
-
 ### Como rodar
-
 ```bash
 uvicorn api:app --reload
 ```
-
 Depois de rodar, a documentação interativa gerada automaticamente pelo FastAPI fica disponível em:
-
 ```
 http://127.0.0.1:8000/docs
 ```
-
 ### Próximos passos
-
-- [ ] Criptografar dados sensíveis do usuário (ex: email) em repouso, com criptografia reversível (diferente do hash da senha, que nunca precisa ser lido de volta)
-- [ ] Decidir se vale manter a rota `GET /usuario`, já que hoje ela só retorna uma mensagem
-- [ ] Revisar/redocumentar no README o trade-off entre incluir o papel no payload do token vs. consultar sempre a fonte de dados — considerando o que fazer se o papel de um usuário logado mudar antes do token expirar
-
+Sem pendências no momento.
 ### Resolvido recentemente
-
+- [x] Removida a rota `GET /usuario`, que só retornava uma mensagem de boas-vindas sem utilidade real
+- [x] Criptografado o email do usuário em repouso, usando criptografia simétrica reversível (`Fernet`, da lib `cryptography`), diferente do hash da senha (que nunca precisa ser lido de volta). O email é criptografado no cadastro e ao ser alterado no próprio perfil, e descriptografado apenas onde precisa ser exibido (`/admin`); o dicionário `usuario_cadastro` continua indexado pelo email em texto puro, já que a criptografia gera um resultado diferente a cada execução e não poderia ser usada como chave de busca
+- [x] Corrigido o `return` da rota `/admin`, que estava indentado dentro do `for` e por isso interrompia o loop e devolvia só o primeiro usuário cadastrado; movido para fora do loop, agora a rota devolve todos os usuários
 - [x] Adicionada a rota `PATCH /admin/usuario` para reset de senha de um usuário por um admin (fluxo "esqueci minha senha"), usando um modelo próprio (`UsuarioSenha`, só com `email` e `senha`) em vez de reaproveitar um modelo com campos desnecessários
 - [x] Adicionada a rota `DELETE /perfil/usuario`, para o próprio usuário deletar a conta, usando somente o email do token (sem receber nada no corpo da requisição)
 - [x] Adicionada a rota `PATCH /perfil/usuario`, para o próprio usuário editar nome, email e senha, buscando o usuário sempre pelo email do token (nunca por um email vindo do corpo, para não permitir editar a conta de outra pessoa)
@@ -133,11 +104,12 @@ http://127.0.0.1:8000/docs
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
 - [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`, `UsuarioDelete`, `UsuarioSenha`) separados da classe `Usuario`, que guarda o estado em memória
 - [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
-
 ## Aprendizados do projeto
-
 Este projeto foi usado como base prática para consolidar conceitos de:
-
+- Criptografia simétrica reversível (`Fernet`) versus hash irreversível (`bcrypt`): quando usar cada uma, dependendo se o dado precisa ser lido de volta em algum momento
+- Por que um valor criptografado com `Fernet` muda a cada execução (mesmo para o mesmo texto de entrada), e por que isso impede usá-lo como chave de busca em um dicionário — a chave precisa continuar em texto puro, e só o valor guardado dentro do objeto é que fica criptografado
+- Gerenciamento de segredos com variáveis de ambiente (`.env`), incluindo geração de chaves de criptografia e o cuidado de nunca commitar esse arquivo
+- Conversão entre `str` e `bytes` (`.encode()`/`.decode()`) como pré-requisito para operações de criptografia, que trabalham a nível de bytes
 - Escopo de variáveis em Python (locais, de classe e de módulo/`global`) e compartilhamento de estado entre requisições diferentes
 - Diferença entre um modelo Pydantic (`BaseModel`, usado para validar o corpo da requisição) e uma classe comum usada para guardar estado em memória
 - Por que gravar em atributo de classe (`Classe.atributo = valor`) compartilha o dado entre todas as instâncias/requisições, e por que isso é um anti-padrão para estado por usuário
@@ -160,11 +132,9 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Por que, num dicionário indexado por email, alterar apenas o atributo `.email` de um objeto não move o registro — é preciso criar a entrada na nova chave e apagar a antiga — e por que é necessário checar conflito de email antes de permitir a troca
 - Como percorrer um dicionário com `for` para acumular resultados em uma lista com `.append()`, e por que declarar a lista **antes** do loop (não dentro dele) é essencial para não perder os dados de cada volta
 - Por que um `return` dentro de um loop interrompe a execução na primeira volta, e por que ele deve ficar fora do `for` quando o objetivo é processar todos os itens
-- Por que segredos (como a `SECRET_KEY`) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
+- Por que segredos (como `SECRET_KEY` e `FERNET_KEY`) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`, `PATCH`, `DELETE`), path parameters e por que cada combinação verbo+path deve representar uma única ação
-
 ## Autora
-
 Luiza Souza ([@lu-izah19](https://github.com/lu-izah19))
