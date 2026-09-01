@@ -1,6 +1,8 @@
-# Importa a classe FastAPI, usada para criar a aplicação/API
+# Importa a classe FastAPI (cria a aplicação) e Depends (injeta dependências, ex: autenticação, nas rotas)
 from fastapi import Depends, FastAPI
+# Importa HTTPBearer, esquema de segurança que extrai o token do cabeçalho "Authorization: Bearer <token>"
 from fastapi.security import HTTPBearer
+# Cria a instância principal da aplicação FastAPI
 app = FastAPI()
 # Importa o módulo de logging, usado para registrar mensagens (info, erro, etc.)
 import logging
@@ -16,11 +18,17 @@ from dotenv import load_dotenv
 import os
 # Importa BaseModel do pydantic, usado para criar os modelos de dados (schemas) da API
 from pydantic import BaseModel
+# Importa o fernet do cryptography, usado para criptografar dados de forma simétrica
+from cryptography.fernet import Fernet
 
 # Carrega as variáveis definidas no arquivo .env para o ambiente do processo
 load_dotenv()
 # Lê a variável de ambiente SECRET_KEY, usada para assinar os tokens JWT
-SECRET_KEY =os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("SECRET_KEY")
+# Lê a variável de ambiente FERNET_KEY, usada para criptografar dados
+FERNET_KEY = os.environ.get("FERNET_KEY")
+# Cria o objeto Fernet responsável por criptografar/descriptografar os e-mails, usando a chave lida acima
+fernet = Fernet(FERNET_KEY)
 
 # Configura o logging para exibir mensagens a partir do nível INFO
 logging.basicConfig(level=logging.INFO)
@@ -40,50 +48,45 @@ class Usuario:
         self.senha = senha # Adiciona o atributo senha ao usuário
         self.papel = papel # Adiciona o atributo papel ao usuário
 
+# Recebe o email em texto puro, codifica em bytes e criptografa com Fernet, devolvendo uma string
+def criptografar_email(email):
+    return fernet.encrypt(email.encode('utf-8')).decode('utf-8')
+# Recebe o email criptografado (string), decodifica em bytes e descriptografa, devolvendo o texto original
+def descriptografar_email(email):
+    return fernet.decrypt(email.encode('utf-8')).decode('utf-8')
+
 # Dicionário usado como "banco de dados" em memória, indexado pelo email do usuário
 usuario_cadastro = {}
 
 # Modelo de dados esperado no corpo da requisição de cadastro
 class UsuarioCadastro(BaseModel):
-    nome: str
-    email: str
-    senha: str
-
-# Modelo de dados esperado para a rota de início (apenas o nome)
-class UsuarioInicio(BaseModel):
-    nome: str
+    nome: str  # Nome informado no cadastro
+    email: str  # Email informado no cadastro (texto puro, será criptografado ao salvar)
+    senha: str  # Senha em texto puro, será transformada em hash ao salvar
 
 # Modelo de dados esperado no corpo da requisição de login
 class UsuarioLogin(BaseModel):
-    email: str
-    senha: str
+    email: str  # Email usado para localizar o usuário cadastrado
+    senha: str  # Senha em texto puro, comparada com o hash salvo
 
 # Modelo de dados usado para representar o perfil do usuário (nome e email)
 class UsuarioPerfil(BaseModel):
-    nome: str
-    email: str
+    nome: str  # Nome do usuário
+    email: str  # Email do usuário
 
 # Modelo de dados usado para alterar o papel do usuário (email e novo papel)
 class AlterarPapel(BaseModel):
-    email: str
-    papel: str
+    email: str  # Email do usuário que terá o papel alterado
+    papel: str  # Novo papel a ser atribuído (ex: "user" ou "admin")
 
 # Modelo de dados esperado no corpo da requisição de deleção de usuário
 class UsuarioDelete(BaseModel):
-    email: str
+    email: str  # Email do usuário a ser deletado
 
 # Modelo de dados esperado no corpo da requisição de alteração de senha
 class UsuarioSenha(BaseModel):
-    email: str
-    senha: str
-
-# Rota GET "/usuario", recebe dados de UsuarioInicio (apenas nome)
-@app.get("/usuario")
-def inicio(dados: UsuarioInicio):
-    # Cria um objeto Usuario apenas com o nome recebido
-    usuario = Usuario(nome=dados.nome)
-    # Registra no log uma mensagem de boas-vindas com o nome do usuário
-    logging.info("Olá %s, seja bem vindo(a)!", usuario.nome)
+    email: str  # Email do usuário que terá a senha alterada
+    senha: str  # Nova senha em texto puro (será transformada em hash)
 
 # Rota POST "/usuario", usada para cadastrar um novo usuário
 @app.post("/usuario")
@@ -95,7 +98,7 @@ def cadastro(dados: UsuarioCadastro):
     # Declara que a variável usuario_cadastro usada aqui é a global definida acima
     global usuario_cadastro
     # Cria um novo objeto Usuario com o nome, email, senha hash e papel "user"
-    novo_usuario = Usuario(nome=dados.nome, email=email, senha=senha_hash, papel="user")
+    novo_usuario = Usuario(nome=dados.nome, email=criptografar_email(email), senha=senha_hash, papel="user")
     # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
     # Retorna uma mensagem confirmando o cadastro
@@ -125,7 +128,7 @@ def login(dados: UsuarioLogin):
 
 # Rota GET "/admin", protegida por autenticação via token JWT
 @app.get("/admin")
-def admin(credenciais = Depends(HTTPBearer())):
+def admin(credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído automaticamente do cabeçalho pela dependência HTTPBearer
     logging.info("Acessando a rota de administração...")
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
@@ -141,15 +144,16 @@ def admin(credenciais = Depends(HTTPBearer())):
         lista_usuarios = []
         # Se o usuário for administrador, retorna o nome e email do usuário
         for chave_secreta in usuario_cadastro:
-            lista_usuarios.append({"nome": usuario_cadastro[chave_secreta].nome, "email": usuario_cadastro[chave_secreta].email})
-            return {"usuarios": lista_usuarios}
+            lista_usuarios.append({"nome": usuario_cadastro[chave_secreta].nome, "email": descriptografar_email(usuario_cadastro[chave_secreta].email)})
+            # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
+        return {"usuarios": lista_usuarios}
     else: 
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
 # Rota PATCH "/admin/papel", usada para alterar o papel de um usuário específico
 @app.patch("/admin/papel")
-def alterar_papel(dados: AlterarPapel, credenciais = Depends(HTTPBearer())):
+def alterar_papel(dados: AlterarPapel, credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
@@ -176,7 +180,7 @@ def alterar_papel(dados: AlterarPapel, credenciais = Depends(HTTPBearer())):
 
 # Rota DELETE "/admin/usuario", usada para deletar um usuário específico
 @app.delete("/admin/usuario")
-def deletar_usuario(dados: UsuarioDelete, credenciais = Depends(HTTPBearer())):
+def deletar_usuario(dados: UsuarioDelete, credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
@@ -202,7 +206,7 @@ def deletar_usuario(dados: UsuarioDelete, credenciais = Depends(HTTPBearer())):
 
 # Rota PATCH "/perfil/usuario", usada para alterar o perfil do usuário autenticado
 @app.patch("/perfil/usuario")
-def alterar_perfil(dados: UsuarioCadastro, credenciais = Depends(HTTPBearer())):
+def alterar_perfil(dados: UsuarioCadastro, credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, identifica quem está editando o próprio perfil
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -222,7 +226,7 @@ def alterar_perfil(dados: UsuarioCadastro, credenciais = Depends(HTTPBearer())):
     usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
     # Se o email foi alterado, atualiza a chave no dicionário de cadastro
     if dados.email != payload["email"]:
-        usuario.email = dados.email
+        usuario.email= criptografar_email(dados.email)
         usuario_cadastro[dados.email] = usuario
         del usuario_cadastro[payload["email"]]
     # Retorna mensagem de sucesso após a alteração do perfil   
@@ -230,7 +234,7 @@ def alterar_perfil(dados: UsuarioCadastro, credenciais = Depends(HTTPBearer())):
 
 # Rota PATCH "/admin/usuario", usada para alterar a senha de um usuário específico
 @app.patch("/admin/usuario")
-def alterar_senha(dados: UsuarioSenha, credenciais = Depends(HTTPBearer())):
+def alterar_senha(dados: UsuarioSenha, credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
@@ -257,7 +261,7 @@ def alterar_senha(dados: UsuarioSenha, credenciais = Depends(HTTPBearer())):
 
 # Rota DELETE "/perfil/usuario", usada para deletar o perfil do usuário autenticado
 @app.delete("/perfil/usuario")
-def deletar_usuario(credenciais = Depends(HTTPBearer())):
+def deletar_usuario(credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, identifica quem está deletando a própria conta
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"]) 
@@ -278,7 +282,7 @@ def deletar_usuario(credenciais = Depends(HTTPBearer())):
 
 # Rota GET "/perfil", protegida por autenticação via token JWT
 @app.get("/perfil")
-def perfil(credenciais = Depends(HTTPBearer())):
+def perfil(credenciais = Depends(HTTPBearer())):  # credenciais: token Bearer extraído do cabeçalho, identifica quem está consultando o perfil
     # Registra no log que o perfil está sendo acessado
     logging.info("Acessando o perfil do usuário...")
     try:
@@ -292,3 +296,4 @@ def perfil(credenciais = Depends(HTTPBearer())):
     except jwt.InvalidTokenError:
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
+   
