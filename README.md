@@ -1,13 +1,22 @@
 # miniAPI
+
 Projeto de estudo desenvolvido durante o estágio em desenvolvimento back end, com o objetivo de praticar lógica de programação em Python e, na sequência, os fundamentos de desenvolvimento de APIs com **FastAPI**.
+
 O projeto contém duas versões, que representam etapas diferentes do aprendizado:
 - **Versão terminal** — um sistema de cadastro, login e perfil de usuário rodando via linha de comando.
 - **Versão API** *(em andamento)* — adaptação do mesmo sistema para rodar como uma API web usando FastAPI.
+
 ## Status
 🚧 Em desenvolvimento. A versão terminal está funcional. A versão API já tem rotas próprias por ação, modelos Pydantic separados da classe de estado, salva a senha como hash (`bcrypt`), migrou o armazenamento para múltiplos usuários (dicionário indexado por email), e o `/login` já gera um token JWT assinado (`SECRET_KEY` guardada em `.env`, fora do código). A rota `/perfil` já está protegida por token JWT (`Authorization: Bearer`), sem mais aceitar o email diretamente na URL, e trata token inválido/expirado com 401. O `/login` também trata email inexistente (404) e senha incorreta (401).
+
 Foi adicionada autorização por papel (`user`/`admin`): o cadastro define `"user"` por padrão, e o papel **não é mais informado no login** — o `/login` busca o papel diretamente do cadastro e o inclui dentro do token JWT gerado, já que essa informação já existe desde o cadastro e não faz sentido pedir de novo. A rota `/admin` é restrita a usuários com papel `"admin"` (403 para quem não é) e tem conteúdo próprio: retorna a lista de **todos os usuários cadastrados** (nome e email de cada um), sem expor senha nem papel.
+
 A API agora também cobre um CRUD mais completo de administração e de autogerenciamento de conta: um admin pode alterar o papel de qualquer usuário, excluir um usuário e resetar a senha de alguém que esqueceu; qualquer usuário logado pode editar o próprio perfil (nome, email e senha) ou deletar a própria conta. O tratamento de exceções de token também ficou mais específico: em vez de um `except:` genérico (que podia "engolir" até um `HTTPException` de 403 lançado dentro do mesmo `try`), agora cada rota protegida usa `except jwt.ExpiredSignatureError` e `except jwt.InvalidTokenError` separados, e a lógica de autorização (checar papel) ficou fora do bloco `try`, garantindo que 401 (token inválido) e 403 (sem permissão) nunca se confundam.
+
 O email do usuário agora é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica) dentro do objeto `Usuario`, diferente da senha (hash `bcrypt`, irreversível). O dicionário `usuario_cadastro` continua indexado pelo email em texto puro (necessário, já que a criptografia gera um resultado diferente a cada execução), enquanto o campo `.email` guardado dentro de cada objeto `Usuario` fica sempre criptografado, sendo descriptografado apenas nas rotas que precisam devolvê-lo (como `/admin`).
+
+A API agora também conta com uma suíte inicial de **testes automatizados** com `pytest`, cobrindo o fluxo de login (sucesso e senha incorreta) via `TestClient`, com isolamento de estado entre os testes.
+
 ## Funcionalidades
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
 - Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login)
@@ -21,6 +30,8 @@ O email do usuário agora é criptografado em repouso: ele é salvo de forma rev
 - Tratamento de erros HTTP específicos: 404 (usuário não encontrado), 401 (senha, token inválido ou expirado), 403 (sem permissão de admin), 409 (email já em uso)
 - Registro de eventos via `logging` (início da aplicação, boas-vindas, acesso a rotas protegidas)
 - Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
+- Testes automatizados com `pytest` e `TestClient`, cobrindo o fluxo de login
+
 ## Tecnologias utilizadas
 - Python 3
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
@@ -29,13 +40,18 @@ O email do usuário agora é criptografado em repouso: ele é salvo de forma rev
 - [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT)*
 - [cryptography](https://cryptography.io/) *(criptografia simétrica reversível do email, via `Fernet`)*
 - [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY` e `FERNET_KEY` a partir de `.env`)*
+- [pytest](https://docs.pytest.org/) *(testes automatizados)*
+- [httpx](https://www.python-httpx.org/) *(requisitado internamente pelo `TestClient` do FastAPI/Starlette para simular requisições nos testes)*
 - Módulo `logging` da biblioteca padrão
+
 ## Versão terminal
 Sistema com menu interativo no terminal, controlado por um loop `while True` com estrutura `if/elif/else`. Os dados do usuário são armazenados em memória durante a execução (sem persistência em banco de dados).
+
 ### Como rodar
 ```bash
 python terminal.py
 ```
+
 O programa vai pedir seu nome e, em seguida, exibir um menu com as opções:
 ```
 1. Cadastro
@@ -43,8 +59,10 @@ O programa vai pedir seu nome e, em seguida, exibir um menu com as opções:
 3. Perfil
 4. Sair
 ```
+
 ## Versão API *(em andamento)*
 Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como parte do aprendizado de desenvolvimento de APIs REST.
+
 ### Rotas definidas até o momento
 | Método | Rota | Descrição |
 |--------|------|-----------|
@@ -58,24 +76,52 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 | `PATCH` | `/admin/papel` | Altera o papel (`user`/`admin`) de um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `DELETE` | `/admin/usuario` | Exclui um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `PATCH` | `/admin/usuario` | Reseta a senha de um usuário especificado por email (fluxo de "esqueci minha senha"). Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
+
 > Cada ação tem seu próprio path, o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
+
 ### Configuração necessária
 A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. A criptografia do email depende de uma variável `FERNET_KEY`, usada para criptografar/descriptografar esse dado em repouso. Ambas devem ser definidas em um arquivo `.env` na raiz do projeto (não incluído no repositório):
 ```
 SECRET_KEY=<string aleatória gerada com secrets.token_hex(32)>
 FERNET_KEY=<chave gerada com Fernet.generate_key()>
 ```
+
 ### Como rodar
 ```bash
 uvicorn api:app --reload
 ```
+
 Depois de rodar, a documentação interativa gerada automaticamente pelo FastAPI fica disponível em:
 ```
 http://127.0.0.1:8000/docs
 ```
+
+## Testes automatizados
+A pasta `tests/` contém a suíte de testes escrita com **pytest**, usando o `TestClient` do FastAPI (que depende de `httpx`) para simular requisições HTTP reais contra a aplicação, sem precisar do servidor rodando.
+
+Cada teste começa limpando o dicionário `usuario_cadastro` (função auxiliar `limpar_cadastro()`), garantindo que um teste não interfira no resultado do outro — isolamento de estado entre testes.
+
+### Cobertura atual
+- Login com senha correta: confirma status `200` e presença de `"token"` na resposta
+- Login com senha incorreta: confirma status `401`
+
+### Como rodar
+```bash
+pip install pytest httpx
+pytest -v
+```
+
+### Próximos passos dos testes
+- Cobrir cadastro (sucesso e email duplicado)
+- Cobrir acesso a `/perfil` com e sem token válido
+- Cobrir rotas de admin (`/admin`, `/admin/papel`, `/admin/usuario`)
+- Formalizar a limpeza de estado como fixture (`@pytest.fixture`) em vez de chamada manual
+
 ### Próximos passos
-Sem pendências no momento.
+Sem pendências no momento, além da expansão da suíte de testes listada acima.
+
 ### Resolvido recentemente
+- [x] Adicionada suíte inicial de testes automatizados com `pytest` e `TestClient`, cobrindo o fluxo de login (sucesso e senha incorreta), com limpeza de estado entre testes
 - [x] Removida a rota `GET /usuario`, que só retornava uma mensagem de boas-vindas sem utilidade real
 - [x] Criptografado o email do usuário em repouso, usando criptografia simétrica reversível (`Fernet`, da lib `cryptography`), diferente do hash da senha (que nunca precisa ser lido de volta). O email é criptografado no cadastro e ao ser alterado no próprio perfil, e descriptografado apenas onde precisa ser exibido (`/admin`); o dicionário `usuario_cadastro` continua indexado pelo email em texto puro, já que a criptografia gera um resultado diferente a cada execução e não poderia ser usada como chave de busca
 - [x] Corrigido o `return` da rota `/admin`, que estava indentado dentro do `for` e por isso interrompia o loop e devolvia só o primeiro usuário cadastrado; movido para fora do loop, agora a rota devolve todos os usuários
@@ -104,8 +150,14 @@ Sem pendências no momento.
 - [x] Removido o uso de `input()` e do loop de menu dentro das rotas
 - [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`, `UsuarioDelete`, `UsuarioSenha`) separados da classe `Usuario`, que guarda o estado em memória
 - [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
+
 ## Aprendizados do projeto
 Este projeto foi usado como base prática para consolidar conceitos de:
+- Fundamentos de testes automatizados com `pytest`: convenção de nomes de arquivo (`test_*.py`, não `teste_*.py`) e de função (`def test_*()`) exigida para o pytest descobrir e coletar os testes
+- Uso do `TestClient` (FastAPI/Starlette) para simular requisições HTTP reais contra a aplicação nos testes, em vez de chamar as funções de rota diretamente
+- Isolamento entre testes: por que um teste não pode depender de estado deixado por outro, e como uma função auxiliar de limpeza (embrião do conceito de fixture) resolve isso
+- Estrutura básica de um teste (`assert` para conferir o resultado de uma ação) e o padrão ação → conferência
+- Diferença entre instalar um pacote dentro de uma virtualenv (`.venv`) e no Python do sistema operacional, e por que `sudo pip install` é um anti-padrão que pode mascarar o problema real (PATH apontando para o pip errado) em vez de resolvê-lo
 - Criptografia simétrica reversível (`Fernet`) versus hash irreversível (`bcrypt`): quando usar cada uma, dependendo se o dado precisa ser lido de volta em algum momento
 - Por que um valor criptografado com `Fernet` muda a cada execução (mesmo para o mesmo texto de entrada), e por que isso impede usá-lo como chave de busca em um dicionário — a chave precisa continuar em texto puro, e só o valor guardado dentro do objeto é que fica criptografado
 - Gerenciamento de segredos com variáveis de ambiente (`.env`), incluindo geração de chaves de criptografia e o cuidado de nunca commitar esse arquivo
@@ -136,5 +188,6 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`, `PATCH`, `DELETE`), path parameters e por que cada combinação verbo+path deve representar uma única ação
+
 ## Autora
 Luiza Souza ([@lu-izah19](https://github.com/lu-izah19))
