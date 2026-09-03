@@ -17,6 +17,8 @@ O email do usuário agora é criptografado em repouso: ele é salvo de forma rev
 
 A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
 
+O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida) e roda hoje com **zero avisos** de lint.
+
 ## Funcionalidades
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
 - Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login)
@@ -31,6 +33,7 @@ A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o 
 - Registro de eventos via `logging` (início da aplicação, boas-vindas, acesso a rotas protegidas)
 - Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
 - Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel e as ações de admin/perfil
+- Padrão de estilo verificado por `flake8`, com configuração própria (`.flake8`) e código passando sem nenhum aviso
 
 ## Tecnologias utilizadas
 - Python 3
@@ -42,6 +45,8 @@ A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o 
 - [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY` e `FERNET_KEY` a partir de `.env`)*
 - [pytest](https://docs.pytest.org/) *(testes automatizados)*
 - [httpx](https://www.python-httpx.org/) *(requisitado internamente pelo `TestClient` do FastAPI/Starlette para simular requisições nos testes)*
+- [flake8](https://flake8.pycqa.org/) *(linter de estilo e checagem estática, combinando `pycodestyle`, `pyflakes` e `mccabe`)*
+- [autopep8](https://pypi.org/project/autopep8/) *(formatação automática, usado para corrigir a maior parte dos avisos do flake8)*
 - Módulo `logging` da biblioteca padrão
 
 ## Versão terminal
@@ -127,42 +132,25 @@ pytest -v
 - Formalizar a limpeza de estado como fixture (`@pytest.fixture`) em vez de chamada manual
 - Testar de fato a promoção de um usuário a admin por outro admin (hoje o teste só cobre o login do admin, sem chamar `PATCH /admin/papel`)
 
-### Próximos passos
-Sem pendências no momento, além da expansão da suíte de testes listada acima.
+## Qualidade de código (lint)
+O projeto usa **flake8** para checagem de estilo e alguns erros estáticos, combinando três ferramentas por baixo dos panos: `pycodestyle` (estilo/PEP 8), `pyflakes` (erros lógicos, como import não usado) e `mccabe` (complexidade). A configuração fica no arquivo `.flake8`, na raiz do projeto, com o limite de linha ajustado para 100 caracteres.
 
-### Resolvido recentemente
-- [x] Expandida a suíte de testes de 2 para 11 casos, cobrindo login (email inexistente), acesso a rota protegida (sem token e com token inválido), autorização por papel (usuário comum barrado de `/admin`, `PATCH /admin/papel` e `DELETE /admin/usuario`) e edição do próprio perfil
-- [x] Reconciliados os paths e o formato de corpo usados nos testes com as rotas reais da API (os testes tinham sido escritos pensando em rotas RESTful com id na URL, como `/admin/1`; a API real usa rotas nomeadas com o email no corpo da requisição, como `/admin/papel` e `/admin/usuario`)
-- [x] Corrigida a chamada de `DELETE` com corpo nos testes: o atalho `client.delete(json=...)` do `TestClient` não aceita o argumento `json`, então passou a usar `client.request("DELETE", ..., json=...)`
-- [x] Adicionada suíte inicial de testes automatizados com `pytest` e `TestClient`, cobrindo o fluxo de login (sucesso e senha incorreta), com limpeza de estado entre testes
-- [x] Removida a rota `GET /usuario`, que só retornava uma mensagem de boas-vindas sem utilidade real
-- [x] Criptografado o email do usuário em repouso, usando criptografia simétrica reversível (`Fernet`, da lib `cryptography`), diferente do hash da senha (que nunca precisa ser lido de volta). O email é criptografado no cadastro e ao ser alterado no próprio perfil, e descriptografado apenas onde precisa ser exibido (`/admin`); o dicionário `usuario_cadastro` continua indexado pelo email em texto puro, já que a criptografia gera um resultado diferente a cada execução e não poderia ser usada como chave de busca
-- [x] Corrigido o `return` da rota `/admin`, que estava indentado dentro do `for` e por isso interrompia o loop e devolvia só o primeiro usuário cadastrado; movido para fora do loop, agora a rota devolve todos os usuários
-- [x] Adicionada a rota `PATCH /admin/usuario` para reset de senha de um usuário por um admin (fluxo "esqueci minha senha"), usando um modelo próprio (`UsuarioSenha`, só com `email` e `senha`) em vez de reaproveitar um modelo com campos desnecessários
-- [x] Adicionada a rota `DELETE /perfil/usuario`, para o próprio usuário deletar a conta, usando somente o email do token (sem receber nada no corpo da requisição)
-- [x] Adicionada a rota `PATCH /perfil/usuario`, para o próprio usuário editar nome, email e senha, buscando o usuário sempre pelo email do token (nunca por um email vindo do corpo, para não permitir editar a conta de outra pessoa)
-- [x] Tratada a troca de email na edição de perfil: como `usuario_cadastro` é indexado por email, ao mudar o email é preciso mover o registro para a nova chave e apagar a antiga, além de checar conflito (409) se o novo email já pertencer a outro usuário
-- [x] Adicionada a rota `DELETE /admin/usuario`, para um admin excluir qualquer usuário por email, usando um modelo próprio (`UsuarioDelete`, só com `email`)
-- [x] Adicionada a rota `PATCH /admin/papel`, para um admin alterar o papel de qualquer usuário por email, sem precisar mais editar o dicionário manualmente
-- [x] Corrigido `cadastro()` para salvar o nome real enviado na requisição (`dados.nome`), em vez de forçar `nome=None`
-- [x] Corrigido o `except:` genérico do `/admin` e do `/perfil`, que capturava até o `HTTPException(403)` lançado dentro do próprio `try` e devolvia 401 no lugar. Agora o `try` cuida só do `jwt.decode`, com `except jwt.ExpiredSignatureError` e `except jwt.InvalidTokenError` específicos, e a checagem de papel/autorização fica fora do `try`
-- [x] Removido o campo `papel` do modelo `UsuarioLogin`: o papel não é mais informado no login, e sim obtido diretamente do cadastro (`usuario_cadastro[email].papel`)
-- [x] Token JWT gerado no `/login` agora inclui o papel do usuário no payload (`{"email": ..., "papel": ...}`), além do email
-- [x] Rota `/admin` deixou de retornar apenas os dados do usuário logado (igual `/perfil`) e passou a listar todos os usuários cadastrados, percorrendo `usuario_cadastro` com um `for`, acumulando `nome` e `email` de cada um em uma lista (sem expor senha nem papel)
-- [x] Protegida a rota `/perfil` para exigir token JWT (via header `Authorization: Bearer`, com `HTTPBearer` + `Depends`), em vez de aceitar o email diretamente na URL
-- [x] Email extraído de dentro do token decodificado (`jwt.decode`), em vez de recebido como parâmetro de rota
-- [x] Tratamento de token inválido/expirado com resposta 401, usando `try`/`except` em torno do `jwt.decode`
-- [x] `/login` tratando email inexistente com 404 (`HTTPException`), em vez de deixar o `KeyError` estourar como erro 500
-- [x] `/login` tratando senha incorreta com 401
-- [x] Adicionado campo `papel` (`"user"` por padrão) na classe `Usuario`
-- [x] Criada a rota `/admin`, restrita a usuários com papel `"admin"` (403 para quem não é admin), seguindo o mesmo padrão de autenticação via token da rota `/perfil`
-- [x] Implementada geração de token JWT no `/login` (`jwt.encode`, assinado com `SECRET_KEY` carregada via `.env`/`python-dotenv`)
-- [x] Implementado hash de senha com `bcrypt` (`hashpw`/`gensalt` no cadastro, `checkpw` no login) — senha nunca mais é salva ou comparada em texto puro
-- [x] Migração de `usuario_cadastro` de variável única para dicionário (`{}`), permitindo múltiplos usuários cadastrados ao mesmo tempo
-- [x] Corrigido `cadastro()`, `login()` e `perfil()` para salvarem/lerem os dados de uma instância real de `Usuario`, em vez de escrever/ler diretamente em atributos de classe
-- [x] Removido o uso de `input()` e do loop de menu dentro das rotas
-- [x] Criados modelos Pydantic (`UsuarioCadastro`, `UsuarioInicio`, `UsuarioLogin`, `UsuarioPerfil`, `UsuarioDelete`, `UsuarioSenha`) separados da classe `Usuario`, que guarda o estado em memória
-- [x] Separadas as rotas de cadastro, login, início e perfil em paths próprios, eliminando o conflito de rotas duplicadas
+### Como rodar
+```bash
+pip install flake8
+flake8 api.py
+```
+
+### Como corrigir automaticamente
+Boa parte dos avisos de estilo (espaçamento, linhas em branco, indentação) pode ser corrigida sem edição manual, com o `autopep8`:
+```bash
+pip install autopep8
+autopep8 --in-place --aggressive --max-line-length 100 api.py
+```
+O que sobra depois disso costuma ser erro de lógica (import/variável não usada, função redefinida) — esses o `autopep8` não corrige sozinho, de propósito, porque mudariam o comportamento do código.
+
+### Status atual
+`api.py` roda com **zero avisos** de flake8.
 
 ## Aprendizados do projeto
 Este projeto foi usado como base prática para consolidar conceitos de:
@@ -205,6 +193,13 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Diferença entre passar um dicionário Python válido como corpo da requisição (`json={"campo": valor}`) e escrever o nome da classe do modelo Pydantic dentro do dicionário por engano — o nome do modelo é só documentação/validação do lado do servidor, nunca faz parte do JSON enviado
 - Por que o atalho `TestClient.delete()` não aceita o argumento `json` (por padrão um DELETE "não deveria" ter corpo), e como usar `client.request("DELETE", ..., json=...)` para contornar isso quando a rota exige dados no corpo
 - Uso de `ast.parse()` para isolar rapidamente um `SyntaxError` de um arquivo, sem precisar rodar o pytest inteiro por cima
+- O que é um linter e como o `flake8` funciona por baixo dos panos, combinando `pycodestyle` (estilo), `pyflakes` (erros lógicos) e `mccabe` (complexidade) — e por que os códigos de erro têm essa cara (`E501`, `F401`, `C901`)
+- Diferença entre configurar um linter (`.flake8`, `max-line-length`, `exclude`) e silenciar um aviso pontual com `# noqa: CÓDIGO` numa linha específica, e por que abusar do `# noqa` é sinal de que a regra deveria mudar globalmente, não ser abafada linha a linha
+- Diferença entre erros de **estilo** (linha em branco, espaçamento, comprimento de linha — resolvíveis por formatação automática) e erros de **lógica** (`global` sem uso real, função redefinida — que exigem decisão humana, por isso nenhuma ferramenta de formatação mexe neles sozinha)
+- Uso de `autopep8 --aggressive` para corrigir automaticamente a maior parte dos avisos de estilo de um arquivo já escrito, em vez de corrigir um por um manualmente
+- Por que `global` só é necessário quando uma variável de módulo é **reatribuída** dentro de uma função (`variavel = novo_valor`), e não quando ela é apenas **mutada** (`variavel[chave] = valor`) — nesse segundo caso a declaração `global` não tem efeito nenhum
+- Reconhecer quando duas funções com o mesmo nome no mesmo arquivo (uma sobrescrevendo a outra silenciosamente) é um bug de nomenclatura, mesmo quando o programa continua funcionando sem erro aparente
+- `E402` (import fora do topo do arquivo): por que o PEP 8 exige que todo código executável (como instanciar `app = FastAPI()`) venha depois de todos os imports, e não misturado entre eles
 
 ## Autora
 Luiza Souza ([@lu-izah19](https://github.com/lu-izah19))
