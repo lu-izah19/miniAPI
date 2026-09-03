@@ -15,7 +15,7 @@ A API agora também cobre um CRUD mais completo de administração e de autogere
 
 O email do usuário agora é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica) dentro do objeto `Usuario`, diferente da senha (hash `bcrypt`, irreversível). O dicionário `usuario_cadastro` continua indexado pelo email em texto puro (necessário, já que a criptografia gera um resultado diferente a cada execução), enquanto o campo `.email` guardado dentro de cada objeto `Usuario` fica sempre criptografado, sendo descriptografado apenas nas rotas que precisam devolvê-lo (como `/admin`).
 
-A API agora também conta com uma suíte inicial de **testes automatizados** com `pytest`, cobrindo o fluxo de login (sucesso e senha incorreta) via `TestClient`, com isolamento de estado entre os testes.
+A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
 
 ## Funcionalidades
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
@@ -30,7 +30,7 @@ A API agora também conta com uma suíte inicial de **testes automatizados** com
 - Tratamento de erros HTTP específicos: 404 (usuário não encontrado), 401 (senha, token inválido ou expirado), 403 (sem permissão de admin), 409 (email já em uso)
 - Registro de eventos via `logging` (início da aplicação, boas-vindas, acesso a rotas protegidas)
 - Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
-- Testes automatizados com `pytest` e `TestClient`, cobrindo o fluxo de login
+- Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel e as ações de admin/perfil
 
 ## Tecnologias utilizadas
 - Python 3
@@ -104,6 +104,17 @@ Cada teste começa limpando o dicionário `usuario_cadastro` (função auxiliar 
 ### Cobertura atual
 - Login com senha correta: confirma status `200` e presença de `"token"` na resposta
 - Login com senha incorreta: confirma status `401`
+- Login com email não cadastrado: confirma status `404`
+- Acesso a rota protegida sem token: confirma status `401`
+- Acesso a rota protegida com token inválido: confirma status `401`
+- Login de um usuário comum (fluxo base para os testes de autorização): confirma status `200`
+- Usuário comum tentando acessar `/admin`: confirma status `403`
+- Usuário comum tentando `PATCH /admin/papel`: confirma status `403`
+- Usuário comum tentando `DELETE /admin/usuario`: confirma status `403`
+- Fluxo de login de um admin (base para o teste de promoção de papel)
+- Edição do próprio perfil (`PATCH /perfil/usuario`): confirma status `200` e que a alteração não afeta o perfil de outra pessoa
+
+Total: 11 testes, todos passando.
 
 ### Como rodar
 ```bash
@@ -113,14 +124,16 @@ pytest -v
 
 ### Próximos passos dos testes
 - Cobrir cadastro (sucesso e email duplicado)
-- Cobrir acesso a `/perfil` com e sem token válido
-- Cobrir rotas de admin (`/admin`, `/admin/papel`, `/admin/usuario`)
 - Formalizar a limpeza de estado como fixture (`@pytest.fixture`) em vez de chamada manual
+- Testar de fato a promoção de um usuário a admin por outro admin (hoje o teste só cobre o login do admin, sem chamar `PATCH /admin/papel`)
 
 ### Próximos passos
 Sem pendências no momento, além da expansão da suíte de testes listada acima.
 
 ### Resolvido recentemente
+- [x] Expandida a suíte de testes de 2 para 11 casos, cobrindo login (email inexistente), acesso a rota protegida (sem token e com token inválido), autorização por papel (usuário comum barrado de `/admin`, `PATCH /admin/papel` e `DELETE /admin/usuario`) e edição do próprio perfil
+- [x] Reconciliados os paths e o formato de corpo usados nos testes com as rotas reais da API (os testes tinham sido escritos pensando em rotas RESTful com id na URL, como `/admin/1`; a API real usa rotas nomeadas com o email no corpo da requisição, como `/admin/papel` e `/admin/usuario`)
+- [x] Corrigida a chamada de `DELETE` com corpo nos testes: o atalho `client.delete(json=...)` do `TestClient` não aceita o argumento `json`, então passou a usar `client.request("DELETE", ..., json=...)`
 - [x] Adicionada suíte inicial de testes automatizados com `pytest` e `TestClient`, cobrindo o fluxo de login (sucesso e senha incorreta), com limpeza de estado entre testes
 - [x] Removida a rota `GET /usuario`, que só retornava uma mensagem de boas-vindas sem utilidade real
 - [x] Criptografado o email do usuário em repouso, usando criptografia simétrica reversível (`Fernet`, da lib `cryptography`), diferente do hash da senha (que nunca precisa ser lido de volta). O email é criptografado no cadastro e ao ser alterado no próprio perfil, e descriptografado apenas onde precisa ser exibido (`/admin`); o dicionário `usuario_cadastro` continua indexado pelo email em texto puro, já que a criptografia gera um resultado diferente a cada execução e não poderia ser usada como chave de busca
@@ -188,6 +201,10 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`, `PATCH`, `DELETE`), path parameters e por que cada combinação verbo+path deve representar uma única ação
+- Diagnóstico de testes de API por código de status: como a progressão de um erro (404 → 405 → 422 → 200/403) durante o debug aponta, nessa ordem, para "rota não existe" → "método errado" → "corpo da requisição errado" → "lógica de autorização", útil pra saber onde procurar antes mesmo de ler o traceback inteiro
+- Diferença entre passar um dicionário Python válido como corpo da requisição (`json={"campo": valor}`) e escrever o nome da classe do modelo Pydantic dentro do dicionário por engano — o nome do modelo é só documentação/validação do lado do servidor, nunca faz parte do JSON enviado
+- Por que o atalho `TestClient.delete()` não aceita o argumento `json` (por padrão um DELETE "não deveria" ter corpo), e como usar `client.request("DELETE", ..., json=...)` para contornar isso quando a rota exige dados no corpo
+- Uso de `ast.parse()` para isolar rapidamente um `SyntaxError` de um arquivo, sem precisar rodar o pytest inteiro por cima
 
 ## Autora
 Luiza Souza ([@lu-izah19](https://github.com/lu-izah19))
