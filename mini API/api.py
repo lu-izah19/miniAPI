@@ -50,6 +50,8 @@ logging.basicConfig(level=logging.INFO)
 # Rota GET na raiz ("/") da API
 @app.get("/")
 def home():
+    # Registra no log que a rota raiz da API foi acessada
+    logging.info("Acessando a rota raiz da API...")
     # Retorna uma mensagem simples de boas-vindas em formato JSON
     return {"message": "Bem-vindo à API!"}
 
@@ -66,12 +68,14 @@ class Usuario:
 
 # Recebe o email em texto puro, codifica em bytes e criptografa com Fernet, devolvendo uma string
 def criptografar_email(email):
+    logging.info(f"Criptografando email: {email}")
     return fernet.encrypt(email.encode('utf-8')).decode('utf-8')
 
 
 # Recebe o email criptografado (string), decodifica em bytes e
 # descriptografa, devolvendo o texto original
 def descriptografar_email(email):
+    logging.info(f"Descriptografando email: {email}")
     return fernet.decrypt(email.encode('utf-8')).decode('utf-8')
 
 
@@ -131,6 +135,8 @@ def cadastro(dados: UsuarioCadastro):
         papel="user")
     # Salva o novo usuário no dicionário, usando o email como chave
     usuario_cadastro[email] = novo_usuario
+    # Registra no log que o usuário foi cadastrado com sucesso
+    logging.info(f"Usuário cadastrado com sucesso: {email}")
     # Retorna uma mensagem confirmando o cadastro
     return {"mensagem": "Cadastro realizado com sucesso!"}
 
@@ -152,12 +158,18 @@ def login(dados: UsuarioLogin):
             jtoken = jwt.encode({"email": email_login,
                                 "papel": usuario_cadastro[email_login].papel},
                                 SECRET_KEY, algorithm="HS256")
+            # Registra no log que o login foi realizado com sucesso
+            logging.info(f"Login realizado com sucesso para o email {email_login}.")
             # Retorna mensagem de sucesso junto com o token gerado
             return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
         else:
+            # Caso a senha não confira, registra o erro no log
+            logging.error(f"Senha incorreta para o email {email_login}.")
             # Caso a senha não confira, retorna mensagem de senha incorreta
             raise HTTPException(status_code=401, detail="Senha incorreta!")
     else:
+        # Caso o email não exista no cadastro, registra o erro no log
+        logging.error(f"Email {email_login} não encontrado no cadastro.")
         # Caso email/senha não confiram, retorna mensagem de erro de login
         raise HTTPException(status_code=404, detail="Email incorreto!")
 
@@ -172,9 +184,13 @@ def admin(credenciais=Depends(HTTPBearer())):
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o usuário é administrador com base no papel armazenado no cadastro
@@ -185,9 +201,13 @@ def admin(credenciais=Depends(HTTPBearer())):
             lista_usuarios.append({
                 "nome": usuario_cadastro[chave_secreta].nome,
                 "email": descriptografar_email(usuario_cadastro[chave_secreta].email)})
-            # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
+        # Registra no log que o usuário administrador acessou a lista de usuários cadastrados
+        logging.info(f"Usuário {payload['email']} acessou a lista de usuários cadastrados.")
+        # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
         return {"usuarios": lista_usuarios}
     else:
+        # Caso o usuário não seja administrador, registra o erro no log
+        logging.error(f"Usuário {payload['email']} não é administrador")
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
@@ -201,9 +221,13 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o usuário é administrador com base no papel armazenado no cadastro
@@ -212,12 +236,18 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
             # Altera o papel do usuário especificado no corpo da requisição
             usuario = usuario_cadastro[dados.email]
             usuario.papel = dados.papel
+            # Registra no log que o papel do usuário foi alterado com sucesso
+            logging.info(f"Papel do usuário {dados.email} alterado por {payload['email']} para {dados.papel}.")
             # Registra que o papel do usuário foi alterado
             return {"mensagem": "Papel de usuário alterado!", "papel": usuario.papel}
         else:
+            # Caso o email não exista no cadastro, registra o erro no log
+            logging.error(f"Usuário {dados.email} não encontrado para alteração de papel.")
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
+        # Caso o usuário não seja administrador, registra o erro no log
+        logging.error(f"Usuário {payload['email']} não é administrador")
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
@@ -231,9 +261,13 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")    
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o usuário é administrador com base no papel armazenado no cadastro
@@ -241,12 +275,18 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
         if dados.email in usuario_cadastro:
             # Deleta o usuário especificado no corpo da requisição
             del usuario_cadastro[dados.email]
+            # Registra no log que o usuário foi deletado com sucesso
+            logging.info(f"Usuário {dados.email} deletado com sucesso por {payload['email']}.")
             # Registra que o usuário foi deletado
             return {"mensagem": "Usuário deletado com sucesso!"}
         else:
+            # Caso o email não exista no cadastro, registra o erro no log
+            logging.error(f"Usuário {dados.email} não encontrado.")
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
+        # Caso o usuário não seja administrador, registra o erro no log
+        logging.error(f"Usuário {payload['email']} não é administrador")
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
@@ -260,13 +300,19 @@ def alterar_perfil(dados: UsuarioCadastro, credenciais=Depends(HTTPBearer())):
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o email enviado no corpo da requisição já está em uso por outro usuário
     if dados.email in usuario_cadastro and dados.email != payload["email"]:
+        # Caso o email já esteja em uso, registra a informação no log
+        logging.info(f"Email {dados.email} já está em uso por outro usuário.")
         # Caso o email já esteja em uso, retorna erro de conflito
         raise HTTPException(status_code=409, detail="Email já está em uso!")
     # Atualiza os dados do usuário no dicionário de cadastro
@@ -278,6 +324,8 @@ def alterar_perfil(dados: UsuarioCadastro, credenciais=Depends(HTTPBearer())):
         usuario.email = criptografar_email(dados.email)
         usuario_cadastro[dados.email] = usuario
         del usuario_cadastro[payload["email"]]
+    # Registra no log que os dados do usuário foram alterados com sucesso
+    logging.info(f"Dados do usuário {payload['email']} alterados com sucesso.")
     # Retorna mensagem de sucesso após a alteração do perfil
     return {"mensagem": "Perfil alterado com sucesso!"}
 
@@ -291,9 +339,13 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o usuário é administrador com base no papel armazenado no cadastro
@@ -302,12 +354,18 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
             # Altera a senha do usuário especificado no corpo da requisição
             usuario = usuario_cadastro[dados.email]
             usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+            # Registra no log que a senha do usuário foi alterada com sucesso
+            logging.info(f"Senha do usuário {dados.email} alterada com sucesso por {payload['email']}.")
             # Registra que a senha do usuário foi alterada
             return {"mensagem": "Senha de usuário alterada!"}
         else:
+            # Caso o email não exista no cadastro, registra o erro no log
+            logging.error(f"Usuário {dados.email} não encontrado para alteração de senha.")
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
+        # Caso o usuário não seja administrador, registra o erro no log
+        logging.error(f"Usuário {payload['email']} não é administrador")
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
@@ -321,17 +379,25 @@ def deletar_perfil_proprio(credenciais=Depends(HTTPBearer())):
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     if payload["email"] in usuario_cadastro:
         # Deleta o usuário especificado no corpo da requisição
         del usuario_cadastro[payload["email"]]
+        # Registra no log que o usuário foi deletado com sucesso
+        logging.info(f"Usuário {payload['email']} deletado com sucesso.")
         # Registra que o usuário foi deletado
         return {"mensagem": "Usuário deletado com sucesso!"}
     else:
+        # Caso o email não exista no cadastro, registra o erro no log
+        logging.error(f"Usuário {payload['email']} não encontrado para deleção.")
         # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
         raise HTTPException(status_code=404, detail="Usuário não encontrado!")
 
@@ -346,11 +412,17 @@ def perfil(credenciais=Depends(HTTPBearer())):
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
+        # Registra no log que o perfil do usuário foi acessado com sucesso
+        logging.info(f"Perfil do usuário {payload['email']} acessado com sucesso!")
         # Retorna o nome e email do usuário, obtidos a partir do payload do token
         return {"nome": usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
     except jwt.ExpiredSignatureError:
+        # Caso o token tenha expirado, registra o erro no log
+        logging.error("Token expirado!")
         # Caso o token tenha expirado, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token expirado!")
     except jwt.InvalidTokenError:
+        # Caso o token seja inválido, registra o erro no log
+        logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
