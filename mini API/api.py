@@ -33,6 +33,9 @@ from fastapi import HTTPException
 # Importa BaseModel do pydantic, usado para criar os modelos de dados (schemas) da API
 from pydantic import BaseModel
 
+# Importa datetime, usado para manipular datas e horas (ex: expiração de tokens)
+import datetime  
+
 # Cria a instância principal da aplicação FastAPI
 app = FastAPI()
 
@@ -168,7 +171,9 @@ def login(dados: UsuarioLogin):
     if EMAIL_ROOT == email_login and SENHA_ROOT == senha_login:
         # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
         # usando o algoritmo HS256
-        jtoken = jwt.encode({"email": email_login, "papel": "root"},
+        jtoken = jwt.encode({"email": email_login, "papel": "root",
+                            "exp": datetime.datetime.now(datetime.timezone.utc) + 
+                            datetime.timedelta(minutes=30)},
             SECRET_KEY, algorithm="HS256")
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
@@ -182,7 +187,9 @@ def login(dados: UsuarioLogin):
                 # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
                 # usando o algoritmo HS256
                 jtoken = jwt.encode({"email": email_login,
-                                    "papel": usuario_cadastro[email_login].papel},
+                                    "papel": usuario_cadastro[email_login].papel,
+                                    "exp": datetime.datetime.now(datetime.timezone.utc) + 
+                                    datetime.timedelta(minutes=30)},
                                     SECRET_KEY, algorithm="HS256")
                 # Registra no log que o login foi realizado com sucesso
                 logging.info(f"Login realizado com sucesso para o email {email_login}.")
@@ -220,12 +227,14 @@ def admin(credenciais=Depends(HTTPBearer())):
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o usuário autenticado é o root, comparando email e papel com as variáveis de ambiente
-    if EMAIL_ROOT == payload["email"] and SENHA_ROOT == payload["papel"] == "root":
+    if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Retorna a lista de emails dos usuários cadastrados em formato JSON
         return {"usuarios": list(usuario_cadastro.keys())}
     else:
+        if payload["email"] not in usuario_cadastro:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado!")
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
         if usuario_cadastro[payload["email"]].papel == "admin":
             lista_usuarios = []
@@ -270,10 +279,9 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
             usuario.papel = dados.papel
             # Registra no log que o papel do usuário foi alterado com sucesso
             logging.info(
-                f"Papel do usuário {
-                    dados.email} alterado por {
-                    payload['email']} para {
-                    dados.papel}.")
+                f"Papel do usuário {dados.email} alterado por "
+                f"{payload['email']} para {dados.papel}."
+            )
             # Registra que o papel do usuário foi alterado
             return {"mensagem": "Papel de usuário alterado!", "papel": usuario.papel}
         else:
@@ -402,9 +410,9 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
                 usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
                 # Registra no log que a senha do usuário foi alterada com sucesso
                 logging.info(
-                    f"Senha do usuário {
-                        dados.email} alterada com sucesso por {
-                        payload['email']}.")
+                    f"Senha do usuário {dados.email} alterada com sucesso "
+                    f"por {payload['email']}."
+                )
                 # Registra que a senha do usuário foi alterada
                 return {"mensagem": "Senha de usuário alterada!"}
         else:
