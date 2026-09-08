@@ -38,6 +38,12 @@ app = FastAPI()
 
 # Carrega as variáveis definidas no arquivo .env para o ambiente do processo
 load_dotenv()
+# Lê a variável de ambiente USUARIO_ROOT, usada para autenticar o usuário root
+USUARIO_ROOT = os.environ.get("USUARIO_ROOT")
+# Lê a variável de ambiente SENHA_ROOT, usada para autenticar o usuário root
+SENHA_ROOT = os.environ.get("SENHA_ROOT")
+# Lê a variável de ambiente EMAIL_ROOT, usada para autenticar o usuário root
+EMAIL_ROOT = os.environ.get("EMAIL_ROOT")
 # Lê a variável de ambiente SECRET_KEY, usada para assinar os tokens JWT
 SECRET_KEY = os.environ.get("SECRET_KEY")
 # Lê a variável de ambiente FERNET_KEY, usada para criptografar dados
@@ -158,29 +164,40 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-    # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
-    if email_login in usuario_cadastro:
-        # Verifica se o email e a senha conferem com os dados cadastrados
-        if bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
-            # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
-            # usando o algoritmo HS256
-            jtoken = jwt.encode({"email": email_login,
-                                "papel": usuario_cadastro[email_login].papel},
-                                SECRET_KEY, algorithm="HS256")
-            # Registra no log que o login foi realizado com sucesso
-            logging.info(f"Login realizado com sucesso para o email {email_login}.")
-            # Retorna mensagem de sucesso junto com o token gerado
-            return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
-        else:
-            # Caso a senha não confira, registra o erro no log
-            logging.error(f"Senha incorreta para o email {email_login}.")
-            # Caso a senha não confira, retorna mensagem de senha incorreta
-            raise HTTPException(status_code=401, detail="Senha incorreta!")
+    # Verifica se o usuário autenticado é o root, comparando email e senha com as variáveis de ambiente
+    if EMAIL_ROOT == email_login and SENHA_ROOT == senha_login:
+        # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
+        # usando o algoritmo HS256
+        jtoken = jwt.encode({"email": email_login, "papel": "root"},
+            SECRET_KEY, algorithm="HS256")
+        # Registra no log que o usuário root foi autenticado com sucesso
+        logging.info("Usuário root autenticado com sucesso.")
+        # Retorna o token JWT gerado para o usuário root
+        return {"token": jtoken}
     else:
-        # Caso o email não exista no cadastro, registra o erro no log
-        logging.error(f"Email {email_login} não encontrado no cadastro.")
-        # Caso email/senha não confiram, retorna mensagem de erro de login
-        raise HTTPException(status_code=404, detail="Email incorreto!")
+        # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
+        if email_login in usuario_cadastro:
+            # Verifica se o email e a senha conferem com os dados cadastrados
+            if bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
+                # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
+                # usando o algoritmo HS256
+                jtoken = jwt.encode({"email": email_login,
+                                    "papel": usuario_cadastro[email_login].papel},
+                                    SECRET_KEY, algorithm="HS256")
+                # Registra no log que o login foi realizado com sucesso
+                logging.info(f"Login realizado com sucesso para o email {email_login}.")
+                # Retorna mensagem de sucesso junto com o token gerado
+                return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
+            else:
+                # Caso a senha não confira, registra o erro no log
+                logging.error(f"Senha incorreta para o email {email_login}.")
+                # Caso a senha não confira, retorna mensagem de senha incorreta
+                raise HTTPException(status_code=401, detail="Senha incorreta!")
+        else:
+            # Caso o email não exista no cadastro, registra o erro no log
+            logging.error(f"Email {email_login} não encontrado no cadastro.")
+            # Caso email/senha não confiram, retorna mensagem de erro de login
+            raise HTTPException(status_code=404, detail="Email incorreto!")
 
 
 # Rota GET "/admin", protegida por autenticação via token JWT
@@ -202,24 +219,30 @@ def admin(credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-    if usuario_cadastro[payload["email"]].papel == "admin":
-        lista_usuarios = []
-        # Se o usuário for administrador, retorna o nome e email do usuário
-        for chave_secreta in usuario_cadastro:  # noqa: PLC0206
-            lista_usuarios.append({
-                "nome": usuario_cadastro[chave_secreta].nome,
-                "email": descriptografar_email(usuario_cadastro[chave_secreta].email)})
-        # Registra no log que o usuário administrador acessou a lista de usuários cadastrados
-        logging.info(f"Usuário {payload['email']} acessou a lista de usuários cadastrados.")
-        # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
-        return {"usuarios": lista_usuarios}
+    # Verifica se o usuário autenticado é o root, comparando email e papel com as variáveis de ambiente
+    if EMAIL_ROOT == payload["email"] and SENHA_ROOT == payload["papel"] == "root":
+        # Registra no log que o usuário root foi autenticado com sucesso
+        logging.info("Usuário root autenticado com sucesso.")
+        # Retorna a lista de emails dos usuários cadastrados em formato JSON
+        return {"usuarios": list(usuario_cadastro.keys())}
     else:
-        # Caso o usuário não seja administrador, registra o erro no log
-        logging.error(f"Usuário {payload['email']} não é administrador")
-        # Caso o usuário não seja administrador, retorna erro de acesso negado
-        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
-
+        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+        if usuario_cadastro[payload["email"]].papel == "admin":
+            lista_usuarios = []
+            # Se o usuário for administrador, retorna o nome e email do usuário
+            for chave_secreta in usuario_cadastro:  # noqa: PLC0206
+                lista_usuarios.append({
+                    "nome": usuario_cadastro[chave_secreta].nome,
+                    "email": descriptografar_email(usuario_cadastro[chave_secreta].email)})
+            # Registra no log que o usuário administrador acessou a lista de usuários cadastrados
+            logging.info(f"Usuário {payload['email']} acessou a lista de usuários cadastrados.")
+            # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
+            return {"usuarios": lista_usuarios}
+        else:
+            # Caso o usuário não seja administrador, registra o erro no log
+            logging.error(f"Usuário {payload['email']} não é administrador")
+            # Caso o usuário não seja administrador, retorna erro de acesso negado
+            raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
 # Rota PATCH "/admin/papel", usada para alterar o papel de um usuário específico
 @app.patch("/admin/papel")
@@ -395,12 +418,10 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
         # Caso o usuário não seja administrador, retorna erro de acesso negado
         raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
 
-
-# Rota DELETE "/perfil/usuario", usada para deletar o perfil do usuário autenticado
-@app.delete("/perfil/usuario")
-# Função que deleta o perfil do usuário autenticado, usando o token JWT para identificar o usuário
-# credenciais: token Bearer extraído do cabeçalho, identifica quem está deletando a própria conta
-def deletar_perfil_proprio(credenciais=Depends(HTTPBearer())):
+# Rota PATCH "/perfil/desativar", usada para desativar o perfil do usuário autenticado
+@app.patch("/perfil/desativar")
+# Função que desativa o perfil do usuário autenticado, usando o token JWT para identificar o usuário
+def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -415,18 +436,17 @@ def deletar_perfil_proprio(credenciais=Depends(HTTPBearer())):
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
     if payload["email"] in usuario_cadastro:
-        # Deleta o usuário especificado no corpo da requisição
-        del usuario_cadastro[payload["email"]]
-        # Registra no log que o usuário foi deletado com sucesso
-        logging.info(f"Usuário {payload['email']} deletado com sucesso.")
-        # Registra que o usuário foi deletado
-        return {"mensagem": "Usuário deletado com sucesso!"}
+        # Desativa o usuário especificado no corpo da requisição
+        usuario_cadastro[payload["email"]].ativo = False
+        # Registra no log que o usuário foi desativado com sucesso
+        logging.info(f"Usuário {payload['email']} desativado com sucesso.")
+        # Registra que o usuário foi desativado
+        return {"mensagem": "Usuário desativado com sucesso!"}
     else:
         # Caso o email não exista no cadastro, registra o erro no log
-        logging.error(f"Usuário {payload['email']} não encontrado para deleção.")
+        logging.error(f"Usuário {payload['email']} não encontrado para desativação.")
         # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
         raise HTTPException(status_code=404, detail="Usuário não encontrado!")
-
 
 # Rota GET "/perfil", protegida por autenticação via token JWT
 @app.get("/perfil")
