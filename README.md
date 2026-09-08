@@ -21,6 +21,12 @@ Os logs das rotas administrativas (`/admin/papel`, e as duas de `/admin/usuario`
 
 O email do usuário agora é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica) dentro do objeto `Usuario`, diferente da senha (hash `bcrypt`, irreversível). O dicionário `usuario_cadastro` continua indexado pelo email em texto puro (necessário, já que a criptografia gera um resultado diferente a cada execução), enquanto o campo `.email` guardado dentro de cada objeto `Usuario` fica sempre criptografado, sendo descriptografado apenas nas rotas que precisam devolvê-lo (como `/admin`).
 
+Foi adicionado um **usuário root fixo**, configurado inteiramente por variáveis de ambiente (`USUARIO_ROOT`, `SENHA_ROOT`, `EMAIL_ROOT`) e que **não é salvo no dicionário `usuario_cadastro`** — diferente de todos os outros usuários. Essa decisão garante que o root sobreviva a qualquer operação de exclusão em massa dos usuários cadastrados, já que ele não depende do estado em memória para existir. O `/login` reconhece o root comparando as credenciais recebidas diretamente com as variáveis de ambiente (antes de consultar o dicionário) e gera um token normalmente, com `"papel": "root"`. A rota `/admin` também trata o root como um caso especial (checando `payload["papel"] == "root"`), sem tentar buscá-lo no dicionário, evitando um `KeyError` que ocorreria se ele fosse tratado como um usuário comum.
+
+Os tokens JWT gerados no `/login` (tanto para o root quanto para usuários comuns) agora **expiram automaticamente**: cada token carrega uma claim `exp`, definida como o momento atual (UTC) somado a 30 minutos. A validação da expiração já é feita nativamente pelo `jwt.decode()` em todas as rotas protegidas, que capturam essa condição pelo `except jwt.ExpiredSignatureError` já existente — nenhuma lógica extra precisou ser adicionada fora dos dois pontos onde o token é criado.
+
+A opção de o usuário **excluir** a própria conta foi substituída por uma de **desativar** o próprio perfil (`PATCH /perfil/desativar`), que marca o usuário como inativo em vez de removê-lo do dicionário `usuario_cadastro`.
+
 A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
 
 O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida) e roda hoje com **zero avisos** de lint.
@@ -28,11 +34,12 @@ O código também passou a seguir um padrão de estilo verificado por **linter**
 ## Funcionalidades
 
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
-- Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login)
+- Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login), com expiração de 30 minutos (`exp`)
+- Usuário root fixo, definido por variáveis de ambiente e não persistido no dicionário de usuários, sobrevivendo a qualquer exclusão em massa de contas
 - Visualização de perfil do usuário logado, protegida por token JWT
 - Edição do próprio perfil (nome, email e/ou senha, todos opcionais — só é alterado o que for enviado), protegida por token JWT, com verificação de conflito de email
-- Exclusão da própria conta, protegida por token JWT
-- Rota administrativa (`/admin`), acessível apenas para usuários com papel `"admin"`, que lista todos os usuários cadastrados (nome e email, sem senha)
+- Desativação da própria conta (em vez de exclusão), protegida por token JWT
+- Rota administrativa (`/admin`), acessível para usuários com papel `"admin"` ou para o root, que lista todos os usuários cadastrados (nome e email, sem senha)
 - Alteração do papel de um usuário por um admin, sem precisar editar o dicionário manualmente
 - Exclusão de qualquer usuário por um admin
 - Reset de senha de qualquer usuário por um admin (fluxo de "esqueci minha senha")
@@ -49,9 +56,10 @@ O código também passou a seguir um padrão de estilo verificado por **linter**
 - [FastAPI](https://fastapi.tiangolo.com/) *(versão API)*
 - [Pydantic](https://docs.pydantic.dev/) *(validação de dados de entrada na versão API)*
 - [bcrypt](https://pypi.org/project/bcrypt/) *(hash de senhas na versão API)*
-- [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT)*
+- [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT, incluindo expiração via claim `exp`)*
 - [cryptography](https://cryptography.io/) *(criptografia simétrica reversível do email, via `Fernet`)*
-- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY` e `FERNET_KEY` a partir de `.env`)*
+- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY`, `FERNET_KEY` e das credenciais do usuário root a partir de `.env`)*
+- Módulo `datetime` da biblioteca padrão *(cálculo do horário de expiração dos tokens)*
 - [pytest](https://docs.pytest.org/) *(testes automatizados)*
 - [httpx](https://www.python-httpx.org/) *(requisitado internamente pelo `TestClient` do FastAPI/Starlette para simular requisições nos testes)*
 - [flake8](https://flake8.pycqa.org/) *(linter de estilo e checagem estática, combinando `pycodestyle`, `pyflakes` e `mccabe`)*
@@ -87,11 +95,11 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 |--------|------|-----------|
 | `GET` | `/` | Rota inicial, mensagem de boas-vindas |
 | `POST` | `/usuario` | Cadastro de novo usuário (nome, email e senha; papel `"user"` por padrão). O email é criptografado antes de ser salvo no objeto `Usuario` |
-| `POST` | `/login` | Login do usuário (email e senha). O papel é obtido do cadastro e incluído no token JWT gerado. 404 se o email não existir, 401 se a senha estiver errada |
+| `POST` | `/login` | Login do usuário (email e senha), ou do usuário root (credenciais vindas do `.env`). O papel é obtido do cadastro (ou fixado como `"root"`) e incluído no token JWT gerado, junto com uma expiração de 30 minutos (`exp`). 404 se o email não existir, 401 se a senha estiver errada |
 | `GET` | `/perfil` | Visualização de perfil do usuário logado, protegida por token JWT (`Authorization: Bearer`). 401 se o token for inválido/expirado |
 | `PATCH` | `/perfil/usuario` | Edição do próprio perfil (nome, email e/ou senha — todos opcionais, só altera o que for enviado), protegida por token JWT. O usuário editado é sempre o dono do token (nunca um email vindo do corpo). 409 se o novo email já pertencer a outro usuário. Se o email for alterado, o novo é criptografado antes de ser salvo |
-| `DELETE` | `/perfil/usuario` | Exclusão da própria conta, protegida por token JWT. Não recebe nada no corpo — o usuário deletado é sempre o dono do token |
-| `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"`. Retorna a lista de todos os usuários cadastrados (nome e email descriptografado, sem senha). 401 se o token for inválido/expirado, 403 se o usuário não for admin |
+| `PATCH` | `/perfil/desativar` | Desativação da própria conta, protegida por token JWT. Não recebe nada no corpo — o usuário desativado é sempre o dono do token; o registro continua no dicionário, apenas marcado como inativo |
+| `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"` ou ao usuário root. Retorna a lista de todos os usuários cadastrados (nome e email descriptografado, sem senha). 401 se o token for inválido/expirado, 403 se o usuário não for admin/root |
 | `PATCH` | `/admin/papel` | Altera o papel (`user`/`admin`) de um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `DELETE` | `/admin/usuario` | Exclui um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
 | `PATCH` | `/admin/usuario` | Reseta a senha de um usuário especificado por email (fluxo de "esqueci minha senha"). Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin, 409 se a senha nova for igual à anterior |
@@ -100,11 +108,14 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 
 ### Configuração necessária
 
-A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. A criptografia do email depende de uma variável `FERNET_KEY`, usada para criptografar/descriptografar esse dado em repouso. Ambas devem ser definidas em um arquivo `.env` na raiz do projeto (não incluído no repositório):
+A rota `/login` depende de uma variável de ambiente `SECRET_KEY`, usada para assinar os tokens JWT. A criptografia do email depende de uma variável `FERNET_KEY`, usada para criptografar/descriptografar esse dado em repouso. O usuário root depende de três variáveis próprias (`USUARIO_ROOT`, `SENHA_ROOT`, `EMAIL_ROOT`), que definem suas credenciais fora do dicionário de usuários. Todas devem ser definidas em um arquivo `.env` na raiz do projeto (não incluído no repositório):
 
 ```
 SECRET_KEY=<string aleatória gerada com secrets.token_hex(32)>
 FERNET_KEY=<chave gerada com Fernet.generate_key()>
+USUARIO_ROOT=<nome de exibição do usuário root>
+SENHA_ROOT=<senha do usuário root>
+EMAIL_ROOT=<email do usuário root>
 ```
 
 ### Como rodar
@@ -155,6 +166,8 @@ pytest -v
 - Testar de fato a promoção de um usuário a admin por outro admin (hoje o teste só cobre o login do admin, sem chamar `PATCH /admin/papel`)
 - Cobrir a edição parcial de perfil (só nome, só email, só senha, e combinações entre os três)
 - Cobrir a recusa (409) do reset de senha por admin quando a senha nova é igual à anterior
+- Cobrir o login e o acesso à rota `/admin` pelo usuário root
+- Cobrir a expiração de token (`exp`), simulando um token já vencido e confirmando o 401 retornado
 
 ## Qualidade de código (lint)
 
@@ -217,7 +230,7 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Por que, num dicionário indexado por email, alterar apenas o atributo `.email` de um objeto não move o registro — é preciso criar a entrada na nova chave e apagar a antiga — e por que é necessário checar conflito de email antes de permitir a troca
 - Como percorrer um dicionário com `for` para acumular resultados em uma lista com `.append()`, e por que declarar a lista **antes** do loop (não dentro dele) é essencial para não perder os dados de cada volta
 - Por que um `return` dentro de um loop interrompe a execução na primeira volta, e por que ele deve ficar fora do `for` quando o objetivo é processar todos os itens
-- Por que segredos (como `SECRET_KEY` e `FERNET_KEY`) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
+- Por que segredos (como `SECRET_KEY`, `FERNET_KEY` e as credenciais do usuário root) não devem ficar no código-fonte, e o papel de variáveis de ambiente (`.env`) nisso
 - Boas práticas de segurança básica (nunca logar ou armazenar senhas em texto puro)
 - Níveis de log (`INFO`, `WARNING`) e configuração do módulo `logging`
 - Por que uma linha de log/`raise` colocada **depois** de um `return` ou de um `raise` no mesmo bloco nunca é executada (código morto), e por que a ordem das linhas dentro de uma função importa tanto quanto a lógica em si
@@ -239,6 +252,13 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Por que `global` só é necessário quando uma variável de módulo é **reatribuída** dentro de uma função (`variavel = novo_valor`), e não quando ela é apenas **mutada** (`variavel[chave] = valor`) — nesse segundo caso a declaração `global` não tem efeito nenhum
 - Reconhecer quando duas funções com o mesmo nome no mesmo arquivo (uma sobrescrevendo a outra silenciosamente) é um bug de nomenclatura, mesmo quando o programa continua funcionando sem erro aparente
 - `E402` (import fora do topo do arquivo): por que o PEP 8 exige que todo código executável (como instanciar `app = FastAPI()`) venha depois de todos os imports, e não misturado entre eles
+- Por que um dado sensível que precisa **sobreviver** a uma operação destrutiva sobre outra estrutura de dados (como limpar um dicionário de usuários) não deve viver dentro dessa mesma estrutura — e como tratar esse dado como um caso especial, verificado antes de qualquer acesso ao dicionário, evita tanto perda de dado quanto `KeyError`
+- Por que campos sensíveis como senha nunca devem ser incluídos dentro do payload de um JWT — o token é apenas *assinado*, não *criptografado*, então qualquer pessoa consegue decodificar e ler seu conteúdo sem precisar da `SECRET_KEY`
+- O que a claim `exp` representa dentro do payload de um JWT (timestamp Unix) e como `jwt.encode()` aceita um objeto `datetime` e converte automaticamente
+- Por que `jwt.decode()` já valida a expiração do token sozinho, lançando `jwt.ExpiredSignatureError` quando o `exp` já passou — sem precisar de nenhuma lógica adicional nas rotas que apenas leem o token
+- Diferença entre onde a expiração precisa ser **definida** (nos pontos onde o token é criado, no `/login`) e onde ela é **validada** (automaticamente, em todo `jwt.decode()`), e por que confundir os dois lugares levaria a duplicar lógica desnecessariamente
+- Trade-off entre um tempo de expiração curto (mais seguro, porém mais fricção para o usuário) e um tempo longo (mais confortável, porém mais arriscado se o token vazar), e por que uma conta com privilégios elevados (como o root) pode justificar uma expiração mais curta que a de um usuário comum
+- Conceito de *access token* vs. *refresh token* como estratégia para equilibrar segurança (tokens de vida curta) com experiência de uso (evitar login repetido)
 
 ## Autora
 
