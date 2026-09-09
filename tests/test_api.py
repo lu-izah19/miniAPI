@@ -1,8 +1,10 @@
 # Importa o cliente usado para enviar requisições de teste à API FastAPI.
+import re
+
 from fastapi.testclient import TestClient
 
 # Importa a aplicação e o dicionário de usuários do módulo principal.
-from api import AlterarPapel, UsuarioDelete, app, usuario_cadastro
+from api import app, usuario_cadastro
 
 # Cria um cliente de teste conectado à aplicação.
 client = TestClient(app)
@@ -88,10 +90,8 @@ def test_5_rota_protegida_com_token_inválido_devolve_401():
 def test_6_admin_acessa_admin_com_sucesso():
     # Remove usuários cadastrados por testes anteriores.
     limpar_cadastro()
-    # Cadastra o usuário com uma senha conhecida.
-    cadastrar("Dean", " dean@email.com", "senha123")
     # Tenta realizar o login usando as credenciais corretas.
-    resposta = logar(" dean@email.com", "senha123")
+    resposta = logar("admin@gmail.com.br", "@dmIn&&1423")
     # Confirma que o login foi realizado com sucesso.
     assert resposta.status_code == 200
 
@@ -149,10 +149,25 @@ def test_10_admin_promove_usuário_e_o_papel_muda_de_fato():
     # Remove usuários cadastrados por testes anteriores.
     limpar_cadastro()
     # Cadastra o usuário com uma senha conhecida.
-    cadastrar("Dean", " dean@email.com", "senha123")
+    cadastrar("Dean", "dean@email.com", "senha123")
     # Tenta realizar o login usando as credenciais corretas.
-    resposta = logar(" dean@email.com", "senha123")
+    resposta = logar("admin@gmail.com.br", "@dmIn&&1423")
     # Confirma que o login foi realizado com sucesso.
+    assert resposta.status_code == 200
+    # Tenta fazer PATCH em uma rota de administrador como administrador.
+    resposta = client.patch(
+        "/admin/papel", headers=cabecalho(resposta.json()["token"]),
+        json={"papel": "admin", "email": "dean@email.com"}
+    )
+    # Confirma que a API aceitou a promoção do usuário.
+    assert resposta.status_code == 200
+    # Tenta realizar o login usando as credenciais corretas do usuário promovido.
+    resposta = logar("dean@email.com", "senha123")
+    # Confirma que o login foi realizado com sucesso.
+    assert resposta.status_code == 200
+    # Tenta acessar uma rota protegida como usuário promovido.
+    resposta = client.get("/admin", headers=cabecalho(resposta.json()["token"]))
+    # Confirma que o usuário promovido agora tem acesso à rota de administrador.
     assert resposta.status_code == 200
 
 # Testa se um usuário comum consegue editar o próprio perfil sem afetar o perfil de outro usuário.
@@ -171,3 +186,4 @@ def test_11_editar_o_próprio_perfil_não_afeta_o_perfil_de_outra_pessoa():
         json={"nome": "Britney Spears", "email": "britney@email.com", "senha": "nova_senha123"})
     # Confirma que a edição do perfil foi realizada com sucesso.
     assert resposta.status_code == 200
+    
