@@ -23,19 +23,21 @@ O email do usuário agora é criptografado em repouso: ele é salvo de forma rev
 
 Foi adicionado um **usuário root fixo**, configurado inteiramente por variáveis de ambiente (`USUARIO_ROOT`, `SENHA_ROOT`, `EMAIL_ROOT`) e que **não é salvo no dicionário `usuario_cadastro`** — diferente de todos os outros usuários. Essa decisão garante que o root sobreviva a qualquer operação de exclusão em massa dos usuários cadastrados, já que ele não depende do estado em memória para existir. O `/login` reconhece o root comparando as credenciais recebidas diretamente com as variáveis de ambiente (antes de consultar o dicionário) e gera um token normalmente, com `"papel": "root"`. A rota `/admin` também trata o root como um caso especial (checando `payload["papel"] == "root"`), sem tentar buscá-lo no dicionário, evitando um `KeyError` que ocorreria se ele fosse tratado como um usuário comum.
 
+Essa mesma verificação — checar primeiro se quem chama é o root, antes de qualquer busca no dicionário — precisou ser replicada nas outras rotas administrativas: `PATCH /admin/papel`, `DELETE /admin/usuario` e `PATCH /admin/usuario` (reset de senha). Elas originalmente checavam direto se o papel armazenado no cadastro era `"admin"`, sem considerar o root como um caso à parte, o que causava um `KeyError: 'admin@gmail.com.br'` sempre que o próprio root chamava uma dessas rotas (o email dele nunca existiu em `usuario_cadastro`). A correção replicou em todas elas o mesmo padrão já usado em `/admin`: checar `payload["papel"] == "root"` antes de qualquer acesso ao dicionário.
+
 Os tokens JWT gerados no `/login` (tanto para o root quanto para usuários comuns) agora **expiram automaticamente**: cada token carrega uma claim `exp`, definida como o momento atual (UTC) somado a 30 minutos. A validação da expiração já é feita nativamente pelo `jwt.decode()` em todas as rotas protegidas, que capturam essa condição pelo `except jwt.ExpiredSignatureError` já existente — nenhuma lógica extra precisou ser adicionada fora dos dois pontos onde o token é criado.
 
 A opção de o usuário **excluir** a própria conta foi substituída por uma de **desativar** o próprio perfil (`PATCH /perfil/desativar`), que marca o usuário como inativo em vez de removê-lo do dicionário `usuario_cadastro`.
 
-A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
+A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), promoção de papel de fato (um admin promove um usuário e o usuário promovido volta a logar e acessa `/admin` com o novo token), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
 
-O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida) e roda hoje com **zero avisos** de lint.
+O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida, operadores lógicos sempre no início da linha de continuação, sem espaço em branco sobrando no fim de linha) e roda hoje com **zero avisos** de lint.
 
 ## Funcionalidades
 
 - Cadastro de usuário (nome, email e senha), com papel `"user"` atribuído por padrão
 - Login com verificação de credenciais e geração de token JWT contendo o papel do usuário (obtido do cadastro, não informado no login), com expiração de 30 minutos (`exp`)
-- Usuário root fixo, definido por variáveis de ambiente e não persistido no dicionário de usuários, sobrevivendo a qualquer exclusão em massa de contas
+- Usuário root fixo, definido por variáveis de ambiente e não persistido no dicionário de usuários, sobrevivendo a qualquer exclusão em massa de contas — tratado como caso especial (checado antes de qualquer acesso ao dicionário) em todas as rotas administrativas
 - Visualização de perfil do usuário logado, protegida por token JWT
 - Edição do próprio perfil (nome, email e/ou senha, todos opcionais — só é alterado o que for enviado), protegida por token JWT, com verificação de conflito de email
 - Desativação da própria conta (em vez de exclusão), protegida por token JWT
@@ -47,7 +49,7 @@ O código também passou a seguir um padrão de estilo verificado por **linter**
 - Tratamento de erros HTTP específicos: 404 (usuário não encontrado), 401 (senha, token inválido ou expirado), 403 (sem permissão de admin), 409 (email já em uso ou senha repetida)
 - Registro de eventos via `logging`, incluindo trilha de auditoria completa nas ações administrativas (quem executou, o que foi feito, em quem, e o resultado)
 - Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
-- Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel e as ações de admin/perfil
+- Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel, promoção de papel de fato e as ações de admin/perfil
 - Padrão de estilo verificado por `flake8`, com configuração própria (`.flake8`) e código passando sem nenhum aviso
 
 ## Tecnologias utilizadas
@@ -100,9 +102,9 @@ Adaptação do mesmo sistema para o formato de rotas HTTP com FastAPI, como part
 | `PATCH` | `/perfil/usuario` | Edição do próprio perfil (nome, email e/ou senha — todos opcionais, só altera o que for enviado), protegida por token JWT. O usuário editado é sempre o dono do token (nunca um email vindo do corpo). 409 se o novo email já pertencer a outro usuário. Se o email for alterado, o novo é criptografado antes de ser salvo |
 | `PATCH` | `/perfil/desativar` | Desativação da própria conta, protegida por token JWT. Não recebe nada no corpo — o usuário desativado é sempre o dono do token; o registro continua no dicionário, apenas marcado como inativo |
 | `GET` | `/admin` | Rota administrativa, protegida por token JWT e restrita a usuários com papel `"admin"` ou ao usuário root. Retorna a lista de todos os usuários cadastrados (nome e email descriptografado, sem senha). 401 se o token for inválido/expirado, 403 se o usuário não for admin/root |
-| `PATCH` | `/admin/papel` | Altera o papel (`user`/`admin`) de um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
-| `DELETE` | `/admin/usuario` | Exclui um usuário especificado por email. Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin |
-| `PATCH` | `/admin/usuario` | Reseta a senha de um usuário especificado por email (fluxo de "esqueci minha senha"). Restrita a admins. 404 se o email não existir, 403 se quem chama não for admin, 409 se a senha nova for igual à anterior |
+| `PATCH` | `/admin/papel` | Altera o papel (`user`/`admin`) de um usuário especificado por email. Restrita a admins ou ao root (o root é checado antes de qualquer busca no dicionário, evitando `KeyError`). 404 se o email não existir, 403 se quem chama não for admin |
+| `DELETE` | `/admin/usuario` | Exclui um usuário especificado por email. Restrita a admins ou ao root (mesma checagem de root primeiro). 404 se o email não existir, 403 se quem chama não for admin |
+| `PATCH` | `/admin/usuario` | Reseta a senha de um usuário especificado por email (fluxo de "esqueci minha senha"). Restrita a admins ou ao root (mesma checagem de root primeiro). 404 se o email não existir, 403 se quem chama não for admin, 409 se a senha nova for igual à anterior |
 
 > Cada ação tem seu próprio path, o que resolveu o conflito de rotas duplicadas que existia quando `cadastro`, `login` e `perfil` disputavam o mesmo endereço.
 
@@ -147,7 +149,7 @@ Cada teste começa limpando o dicionário `usuario_cadastro` (função auxiliar 
 - Usuário comum tentando acessar `/admin`: confirma status `403`
 - Usuário comum tentando `PATCH /admin/papel`: confirma status `403`
 - Usuário comum tentando `DELETE /admin/usuario`: confirma status `403`
-- Fluxo de login de um admin (base para o teste de promoção de papel)
+- Promoção de um usuário comum a admin por um admin (`PATCH /admin/papel`), confirmando que o papel muda de fato: o usuário promovido consegue logar de novo e acessar `/admin` com o novo token
 - Edição do próprio perfil (`PATCH /perfil/usuario`): confirma status `200` e que a alteração não afeta o perfil de outra pessoa
 
 Total: 11 testes, todos passando.
@@ -163,7 +165,6 @@ pytest -v
 
 - Cobrir cadastro (sucesso e email duplicado)
 - Formalizar a limpeza de estado como fixture (`@pytest.fixture`) em vez de chamada manual
-- Testar de fato a promoção de um usuário a admin por outro admin (hoje o teste só cobre o login do admin, sem chamar `PATCH /admin/papel`)
 - Cobrir a edição parcial de perfil (só nome, só email, só senha, e combinações entre os três)
 - Cobrir a recusa (409) do reset de senha por admin quando a senha nova é igual à anterior
 - Cobrir o login e o acesso à rota `/admin` pelo usuário root
@@ -203,6 +204,7 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Uso do `TestClient` (FastAPI/Starlette) para simular requisições HTTP reais contra a aplicação nos testes, em vez de chamar as funções de rota diretamente
 - Isolamento entre testes: por que um teste não pode depender de estado deixado por outro, e como uma função auxiliar de limpeza (embrião do conceito de fixture) resolve isso
 - Estrutura básica de um teste (`assert` para conferir o resultado de uma ação) e o padrão ação → conferência
+- O que um `AssertionError` significa na prática: o `assert` da linha apontada rodou, mas o valor obtido não bateu com o esperado — e por que o traceback completo (não só o número da linha) é o que mostra os dois lados da comparação
 - Diferença entre instalar um pacote dentro de uma virtualenv (`.venv`) e no Python do sistema operacional, e por que `sudo pip install` é um anti-padrão que pode mascarar o problema real (PATH apontando para o pip errado) em vez de resolvê-lo
 - Criptografia simétrica reversível (`Fernet`) versus hash irreversível (`bcrypt`): quando usar cada uma, dependendo se o dado precisa ser lido de volta em algum momento
 - Por que um valor criptografado com `Fernet` muda a cada execução (mesmo para o mesmo texto de entrada), e por que isso impede usá-lo como chave de busca em um dicionário — a chave precisa continuar em texto puro, e só o valor guardado dentro do objeto é que fica criptografado
@@ -226,6 +228,7 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Controle de acesso baseado em papel (role-based access control): por que o papel de um usuário deve ser definido no cadastro (pela aplicação) e nunca escolhido livremente pelo próprio usuário
 - Diferença entre uma ação sobre "si mesmo" (identificar o usuário pelo email do token) e uma ação de admin sobre "outra pessoa" (identificar o usuário-alvo por um email recebido no corpo da requisição)
 - `KeyError` ao acessar uma chave inexistente em um dicionário, e por que checar a existência da chave antes (`if chave in dicionario`) sempre precisa vir antes de qualquer outro acesso a essa mesma chave, mesmo dentro de uma condição diferente (como uma comparação de senha)
+- Como a **ordem** das checagens de autorização importa tanto quanto a lógica em si: checar `usuario_cadastro[payload["email"]].papel == "admin"` **antes** de checar se quem chama é o root (que nunca está no dicionário) gera um `KeyError`, mesmo que a regra de "quem pode fazer o quê" esteja certa — a causa era a ordem das condições, não a regra
 - `del` para remover uma entrada de um dicionário
 - Por que, num dicionário indexado por email, alterar apenas o atributo `.email` de um objeto não move o registro — é preciso criar a entrada na nova chave e apagar a antiga — e por que é necessário checar conflito de email antes de permitir a troca
 - Como percorrer um dicionário com `for` para acumular resultados em uma lista com `.append()`, e por que declarar a lista **antes** do loop (não dentro dele) é essencial para não perder os dados de cada volta
@@ -239,6 +242,8 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Pegadinha de comparar uma senha nova com o hash salvo usando `bcrypt.checkpw()` **antes** de sobrescrever esse hash — comparar depois de já ter trocado o valor faz a checagem sempre dar `True`, porque a senha estaria sendo comparada com o hash dela mesma
 - Diferença entre usar `try/except` para um erro que o próprio Python pode lançar em tempo de execução e usar `if/raise` para uma condição de negócio que já se sabe checar de antemão (como comparar duas senhas) — e por que todo bloco `try`/`except` precisa ter corpo, nunca ficar vazio
 - Quebra de uma condição booleana longa (`and` encadeado) em várias linhas usando parênteses, como alternativa manual quando o `autopep8` não mexe em condições de código
+- Diferença entre `W504` (quebra de linha logo depois de um operador lógico, como `and`/`or` deixado no fim da linha) e a convenção adotada de colocar o operador no **início** da linha seguinte — e por que só mover a quebra de linha não resolve nada se o operador continuar na posição errada
+- `W291` (espaço em branco sobrando no fim de uma linha) como um erro sutil de deixar passar ao reformatar manualmente uma condição quebrada em várias linhas, e a configuração de editor ("trim trailing whitespace on save") que evita reintroduzi-lo
 - Risco de um import "morto" entrar no arquivo sem querer via autocomplete do editor, e como o `flake8` (`F401`) sinaliza isso
 - Fundamentos de APIs REST: rotas, métodos HTTP (`GET`, `POST`, `PATCH`, `DELETE`), path parameters e por que cada combinação verbo+path deve representar uma única ação
 - Diagnóstico de testes de API por código de status: como a progressão de um erro (404 → 405 → 422 → 200/403) durante o debug aponta, nessa ordem, para "rota não existe" → "método errado" → "corpo da requisição errado" → "lógica de autorização", útil pra saber onde procurar antes mesmo de ler o traceback inteiro
