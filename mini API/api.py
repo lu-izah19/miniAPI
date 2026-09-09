@@ -34,7 +34,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 # Importa datetime, usado para manipular datas e horas (ex: expiração de tokens)
-import datetime  
+import datetime
 
 # Cria a instância principal da aplicação FastAPI
 app = FastAPI()
@@ -167,14 +167,15 @@ def login(dados: UsuarioLogin):
     email_login = dados.email
     # Extrai a senha enviada no corpo da requisição
     senha_login = dados.senha
-    # Verifica se o usuário autenticado é o root, comparando email e senha com as variáveis de ambiente
+    # Verifica se o usuário autenticado é o root, comparando email e senha com
+    # as variáveis de ambiente
     if EMAIL_ROOT == email_login and SENHA_ROOT == senha_login:
         # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
         # usando o algoritmo HS256
         jtoken = jwt.encode({"email": email_login, "papel": "root",
-                            "exp": datetime.datetime.now(datetime.timezone.utc) + 
-                            datetime.timedelta(minutes=30)},
-            SECRET_KEY, algorithm="HS256")
+                            "exp": datetime.datetime.now(datetime.timezone.utc)
+                             + datetime.timedelta(minutes=30)},
+                            SECRET_KEY, algorithm="HS256")
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Retorna o token JWT gerado para o usuário root
@@ -188,8 +189,8 @@ def login(dados: UsuarioLogin):
                 # usando o algoritmo HS256
                 jtoken = jwt.encode({"email": email_login,
                                     "papel": usuario_cadastro[email_login].papel,
-                                    "exp": datetime.datetime.now(datetime.timezone.utc) + 
-                                    datetime.timedelta(minutes=30)},
+                                     "exp": datetime.datetime.now(datetime.timezone.utc)
+                                     + datetime.timedelta(minutes=30)},
                                     SECRET_KEY, algorithm="HS256")
                 # Registra no log que o login foi realizado com sucesso
                 logging.info(f"Login realizado com sucesso para o email {email_login}.")
@@ -226,7 +227,8 @@ def admin(credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    # Verifica se o usuário autenticado é o root, comparando email e papel com as variáveis de ambiente
+    # Verifica se o usuário autenticado é o root, comparando email e papel com
+    # as variáveis de ambiente
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
@@ -251,9 +253,12 @@ def admin(credenciais=Depends(HTTPBearer())):
             # Caso o usuário não seja administrador, registra o erro no log
             logging.error(f"Usuário {payload['email']} não é administrador")
             # Caso o usuário não seja administrador, retorna erro de acesso negado
-            raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+            raise HTTPException(status_code=403,
+                                detail="Acesso negado! Usuário não é administrador.")
 
 # Rota PATCH "/admin/papel", usada para alterar o papel de um usuário específico
+
+
 @app.patch("/admin/papel")
 # Função que altera o papel de um usuário específico, exigindo autenticação de administrador
 # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
@@ -271,8 +276,10 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-    if usuario_cadastro[payload["email"]].papel == "admin":
+    if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
+        # Registra no log que o usuário root foi autenticado com sucesso
+        logging.info("Usuário root autenticado com sucesso.")
+        # Verifica se o email do usuário a ser alterado existe no cadastro
         if dados.email in usuario_cadastro:
             # Altera o papel do usuário especificado no corpo da requisição
             usuario = usuario_cadastro[dados.email]
@@ -290,10 +297,32 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
-        # Caso o usuário não seja administrador, registra o erro no log
-        logging.error(f"Usuário {payload['email']} não é administrador")
-        # Caso o usuário não seja administrador, retorna erro de acesso negado
-        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+        if usuario_cadastro[payload["email"]].papel == "admin":
+            # Verifica se o email do usuário a ser alterado existe no cadastro
+            if dados.email in usuario_cadastro:
+                # Altera o papel do usuário especificado no corpo da requisição
+                usuario = usuario_cadastro[dados.email]
+                usuario.papel = dados.papel
+                # Registra no log que o papel do usuário foi alterado com sucesso
+                logging.info(
+                    f"Papel do usuário {dados.email} alterado por "
+                    f"{payload['email']} para {dados.papel}."
+                )
+                # Registra que o papel do usuário foi alterado
+                return {"mensagem": "Papel de usuário alterado!", "papel": usuario.papel}
+            else:
+                # Caso o email não exista no cadastro, registra o erro no log
+                logging.error(f"Usuário {dados.email} não encontrado para alteração de papel.")
+                # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+                raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+        else:
+            # Caso o usuário não seja administrador, registra o erro no log
+            logging.error(f"Usuário {payload['email']} não é administrador")
+            # Caso o usuário não seja administrador, retorna erro de acesso negado
+            raise HTTPException(
+                status_code=403, detail="Acesso negado! Usuário não é administrador."
+            )
 
 
 # Rota DELETE "/admin/usuario", usada para deletar um usuário específico
@@ -314,8 +343,10 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-    if usuario_cadastro[payload["email"]].papel == "admin":
+    if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
+        # Registra no log que o usuário root foi autenticado com sucesso
+        logging.info("Usuário root autenticado com sucesso.")
+        # Verifica se o email do usuário a ser deletado existe no cadastro
         if dados.email in usuario_cadastro:
             # Deleta o usuário especificado no corpo da requisição
             del usuario_cadastro[dados.email]
@@ -329,10 +360,28 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
-        # Caso o usuário não seja administrador, registra o erro no log
-        logging.error(f"Usuário {payload['email']} não é administrador")
-        # Caso o usuário não seja administrador, retorna erro de acesso negado
-        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+        if usuario_cadastro[payload["email"]].papel == "admin":
+            # Verifica se o email do usuário a ser deletado existe no cadastro
+            if dados.email in usuario_cadastro:
+                # Deleta o usuário especificado no corpo da requisição
+                del usuario_cadastro[dados.email]
+                # Registra no log que o usuário foi deletado com sucesso
+                logging.info(f"Usuário {dados.email} deletado com sucesso por {payload['email']}.")
+                # Registra que o usuário foi deletado
+                return {"mensagem": "Usuário deletado com sucesso!"}
+            else:
+                # Caso o email não exista no cadastro, registra o erro no log
+                logging.error(f"Usuário {dados.email} não encontrado.")
+                # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+                raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+        else:
+            # Caso o usuário não seja administrador, registra o erro no log
+            logging.error(f"Usuário {payload['email']} não é administrador")
+            # Caso o usuário não seja administrador, retorna erro de acesso negado
+            raise HTTPException(
+                status_code=403, detail="Acesso negado! Usuário não é administrador."
+            )
 
 
 # Rota PATCH "/perfil/usuario", usada para alterar o perfil do usuário autenticado
@@ -355,8 +404,10 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer()
         raise HTTPException(status_code=401, detail="Token inválido!")
     # Verifica se o email enviado no corpo da requisição já está em uso por outro usuário
     if (
-            dados.email is not None and dados.email in usuario_cadastro
-            and dados.email != payload["email"]):
+        dados.email is not None
+        and dados.email in usuario_cadastro
+        and dados.email != payload["email"]
+    ):
         # Caso o email já esteja em uso, registra a informação no log
         logging.info(f"Email {dados.email} já está em uso por outro usuário.")
         # Caso o email já esteja em uso, retorna erro de conflito
@@ -396,8 +447,10 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-    if usuario_cadastro[payload["email"]].papel == "admin":
+    if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
+        # Registra no log que o usuário root foi autenticado com sucesso
+        logging.info("Usuário root autenticado com sucesso.")
+        # Verifica se o email do usuário a ser alterado existe no cadastro
         if dados.email in usuario_cadastro:
             if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario_cadastro[dados.email].senha):
                 # Caso a nova senha seja igual à anterior, registra o erro no log
@@ -421,10 +474,39 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
             # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
-        # Caso o usuário não seja administrador, registra o erro no log
-        logging.error(f"Usuário {payload['email']} não é administrador")
-        # Caso o usuário não seja administrador, retorna erro de acesso negado
-        raise HTTPException(status_code=403, detail="Acesso negado! Usuário não é administrador.")
+        # Verifica se o usuário é administrador com base no papel armazenado no cadastro
+        if usuario_cadastro[payload["email"]].papel == "admin":
+            # Verifica se o email do usuário a ser alterado existe no cadastro
+            if dados.email in usuario_cadastro:
+                if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario_cadastro[dados.email].senha):
+                    # Caso a nova senha seja igual à anterior, registra o erro no log
+                    logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
+                    # Caso a nova senha seja igual à anterior, registra o erro no log
+                    raise HTTPException(status_code=409, detail="Essa senha é igual a anterior!")
+                else:
+                    # Altera a senha do usuário especificado no corpo da requisição
+                    usuario = usuario_cadastro[dados.email]
+                    usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                    # Registra no log que a senha do usuário foi alterada com sucesso
+                    logging.info(
+                        f"Senha do usuário {dados.email} alterada com sucesso "
+                        f"por {payload['email']}."
+                    )
+                    # Registra que a senha do usuário foi alterada
+                    return {"mensagem": "Senha de usuário alterada!"}
+            else:
+                # Caso o email não exista no cadastro, registra o erro no log
+                logging.error(f"Usuário {dados.email} não encontrado para alteração de senha.")
+                # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
+                raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+        else:
+            # Caso o usuário não seja administrador, registra o erro no log
+            logging.error(f"Usuário {payload['email']} não é administrador")
+            # Caso o usuário não seja administrador, retorna erro de acesso negado
+            raise HTTPException(
+                status_code=403, detail="Acesso negado! Usuário não é administrador."
+            )
+
 
 # Rota PATCH "/perfil/desativar", usada para desativar o perfil do usuário autenticado
 @app.patch("/perfil/desativar")
@@ -455,6 +537,7 @@ def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
         logging.error(f"Usuário {payload['email']} não encontrado para desativação.")
         # Caso o email não exista no cadastro, retorna erro de usuário não encontrado
         raise HTTPException(status_code=404, detail="Usuário não encontrado!")
+
 
 # Rota GET "/perfil", protegida por autenticação via token JWT
 @app.get("/perfil")
