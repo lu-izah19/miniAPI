@@ -187,3 +187,20 @@ def test_11_editar_o_próprio_perfil_não_afeta_o_perfil_de_outra_pessoa():
     # Confirma que a edição do perfil foi realizada com sucesso.
     assert resposta.status_code == 200
     
+# Testa se um token JWT vencido impede o acesso a uma rota protegida.
+def test_12_token_ja_nasce_vencido():
+    # Remove usuários cadastrados por testes anteriores.
+    limpar_cadastro()
+    # Cadastra a usuária com uma senha conhecida.
+    cadastrar("Rosa Linn", "rosaLinn@email.com", "senha123")
+    # Cria um token JWT com expiração no passado, tornando-o inválido.
+    payload = {
+        "sub": "rosaLinn@email.com",
+        "exp": datetime.now() - timedelta(hours=1)
+    }
+    # Gera o token JWT vencido usando a chave secreta e o algoritmo HS256.
+    token_vencido = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    # Tenta acessar uma rota protegida usando o token vencido.
+    resposta = client.get("/perfil", headers=cabecalho(token_vencido))
+    # Confirma que a API rejeitou o acesso devido ao token vencido.
+    assert resposta.status_code == 401
