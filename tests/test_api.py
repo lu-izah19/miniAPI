@@ -1,10 +1,18 @@
 # Importa o cliente usado para enviar requisições de teste à API FastAPI.
 import re
 
+# Importa o cliente de teste do FastAPI para simular requisições HTTP.
 from fastapi.testclient import TestClient
 
-# Importa a aplicação e o dicionário de usuários do módulo principal.
-from api import app, usuario_cadastro
+# Importa a biblioteca JWT para criar e decodificar tokens de autenticação.
+import jwt
+
+# Importa as classes e funções necessárias para lidar com datas e tempos.
+from datetime import datetime, timedelta
+
+# Importa a chave secreta, a aplicação FastAPI 
+# e o dicionário de usuários cadastrados do módulo da API.
+from code_principal.api import SECRET_KEY, app, usuario_cadastro
 
 # Cria um cliente de teste conectado à aplicação.
 client = TestClient(app)
