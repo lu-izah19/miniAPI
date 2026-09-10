@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pyjwt
+bcrypt
+python-dotenv
+cryptography
+pytest
+httpx
+flake8
