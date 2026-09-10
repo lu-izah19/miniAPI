@@ -29,6 +29,8 @@ Os tokens JWT gerados no `/login` (tanto para o root quanto para usuários comun
 
 A opção de o usuário **excluir** a própria conta foi substituída por uma de **desativar** o próprio perfil (`PATCH /perfil/desativar`), que marca o usuário como inativo em vez de removê-lo do dicionário `usuario_cadastro`.
 
+🚧 **Em andamento**: o projeto está migrando do armazenamento em dicionário (`usuario_cadastro`, em memória) para um banco de dados **MariaDB** real, usando `mysql.connector` para rodar as queries SQL diretamente (sem ORM). A tabela `usuario` já foi criada, a conexão com o banco já está configurada via variáveis de ambiente, e a rota `/login` já foi migrada (usando `SELECT` + `fetchone()` no lugar de uma busca no dicionário). As demais rotas ainda serão migradas, uma a uma, trocando a mutação de objetos em memória por comandos `UPDATE`/`INSERT`/`DELETE` com `commit()`.
+
 A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), promoção de papel de fato (um admin promove um usuário e o usuário promovido volta a logar e acessa `/admin` com o novo token), expiração de token JWT, e as ações de admin e de autogerenciamento de perfil — tudo passando (12 testes, isolamento de estado entre eles).
 
 O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida, operadores lógicos sempre no início da linha de continuação, sem espaço em branco sobrando no fim de linha) e roda hoje com **zero avisos** de lint.
@@ -60,7 +62,8 @@ O código também passou a seguir um padrão de estilo verificado por **linter**
 - [bcrypt](https://pypi.org/project/bcrypt/) *(hash de senhas na versão API)*
 - [PyJWT](https://pyjwt.readthedocs.io/) *(geração e validação de tokens JWT, incluindo expiração via claim `exp`)*
 - [cryptography](https://cryptography.io/) *(criptografia simétrica reversível do email, via `Fernet`)*
-- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY`, `FERNET_KEY` e das credenciais do usuário root a partir de `.env`)*
+- [python-dotenv](https://pypi.org/project/python-dotenv/) *(carregamento de `SECRET_KEY`, `FERNET_KEY`, das credenciais do usuário root e das credenciais do banco de dados a partir de `.env`)*
+- [mysql-connector-python](https://pypi.org/project/mysql-connector-python/) *(conexão e execução de queries SQL contra o banco de dados MariaDB, em migração do dicionário em memória)*
 - Módulo `datetime` da biblioteca padrão *(cálculo do horário de expiração dos tokens)*
 - [pytest](https://docs.pytest.org/) *(testes automatizados)*
 - [httpx](https://www.python-httpx.org/) *(requisitado internamente pelo `TestClient` do FastAPI/Starlette para simular requisições nos testes)*
