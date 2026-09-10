@@ -29,7 +29,7 @@ Os tokens JWT gerados no `/login` (tanto para o root quanto para usuários comun
 
 A opção de o usuário **excluir** a própria conta foi substituída por uma de **desativar** o próprio perfil (`PATCH /perfil/desativar`), que marca o usuário como inativo em vez de removê-lo do dicionário `usuario_cadastro`.
 
-A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), promoção de papel de fato (um admin promove um usuário e o usuário promovido volta a logar e acessa `/admin` com o novo token), e as ações de admin e de autogerenciamento de perfil — tudo passando (11 testes, isolamento de estado entre eles).
+A suíte de **testes automatizados** com `pytest` foi expandida e agora cobre o fluxo completo: login (sucesso, senha errada, email inexistente), acesso a rota protegida com e sem token válido, autorização por papel (usuário comum barrado de ações de admin), promoção de papel de fato (um admin promove um usuário e o usuário promovido volta a logar e acessa `/admin` com o novo token), expiração de token JWT, e as ações de admin e de autogerenciamento de perfil — tudo passando (12 testes, isolamento de estado entre eles).
 
 O código também passou a seguir um padrão de estilo verificado por **linter** (`flake8`): o `api.py` foi reorganizado (imports agrupados no topo, 2 linhas em branco entre definições, sem espaço em parâmetro nomeado, sem linha comprida, operadores lógicos sempre no início da linha de continuação, sem espaço em branco sobrando no fim de linha) e roda hoje com **zero avisos** de lint.
 
@@ -49,7 +49,7 @@ O código também passou a seguir um padrão de estilo verificado por **linter**
 - Tratamento de erros HTTP específicos: 404 (usuário não encontrado), 401 (senha, token inválido ou expirado), 403 (sem permissão de admin), 409 (email já em uso ou senha repetida)
 - Registro de eventos via `logging`, incluindo trilha de auditoria completa nas ações administrativas (quem executou, o que foi feito, em quem, e o resultado)
 - Criptografia reversível do email em repouso (`Fernet`), descriptografado apenas quando precisa ser exibido
-- Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel, promoção de papel de fato e as ações de admin/perfil
+- Testes automatizados com `pytest` e `TestClient`, cobrindo login, autenticação, autorização por papel, promoção de papel de fato, expiração de token e as ações de admin/perfil
 - Padrão de estilo verificado por `flake8`, com configuração própria (`.flake8`) e código passando sem nenhum aviso
 
 ## Tecnologias utilizadas
@@ -145,6 +145,7 @@ Cada teste começa limpando o dicionário `usuario_cadastro` (função auxiliar 
 - Login com email não cadastrado: confirma status `404`
 - Acesso a rota protegida sem token: confirma status `401`
 - Acesso a rota protegida com token inválido: confirma status `401`
+- Acesso a rota protegida com token expirado: gera um token com a claim `exp` já vencida (sem passar pelo fluxo normal de login) e confirma status `401`
 - Login de um usuário comum (fluxo base para os testes de autorização): confirma status `200`
 - Usuário comum tentando acessar `/admin`: confirma status `403`
 - Usuário comum tentando `PATCH /admin/papel`: confirma status `403`
@@ -152,7 +153,7 @@ Cada teste começa limpando o dicionário `usuario_cadastro` (função auxiliar 
 - Promoção de um usuário comum a admin por um admin (`PATCH /admin/papel`), confirmando que o papel muda de fato: o usuário promovido consegue logar de novo e acessar `/admin` com o novo token
 - Edição do próprio perfil (`PATCH /perfil/usuario`): confirma status `200` e que a alteração não afeta o perfil de outra pessoa
 
-Total: 11 testes, todos passando.
+Total: 12 testes, todos passando.
 
 ### Como rodar
 
@@ -168,7 +169,6 @@ pytest -v
 - Cobrir a edição parcial de perfil (só nome, só email, só senha, e combinações entre os três)
 - Cobrir a recusa (409) do reset de senha por admin quando a senha nova é igual à anterior
 - Cobrir o login e o acesso à rota `/admin` pelo usuário root
-- Cobrir a expiração de token (`exp`), simulando um token já vencido e confirmando o 401 retornado
 
 ## Qualidade de código (lint)
 
@@ -264,6 +264,7 @@ Este projeto foi usado como base prática para consolidar conceitos de:
 - Diferença entre onde a expiração precisa ser **definida** (nos pontos onde o token é criado, no `/login`) e onde ela é **validada** (automaticamente, em todo `jwt.decode()`), e por que confundir os dois lugares levaria a duplicar lógica desnecessariamente
 - Trade-off entre um tempo de expiração curto (mais seguro, porém mais fricção para o usuário) e um tempo longo (mais confortável, porém mais arriscado se o token vazar), e por que uma conta com privilégios elevados (como o root) pode justificar uma expiração mais curta que a de um usuário comum
 - Conceito de *access token* vs. *refresh token* como estratégia para equilibrar segurança (tokens de vida curta) com experiência de uso (evitar login repetido)
+- Como testar a expiração de um JWT sem depender de tempo real: gerar o token manualmente com uma claim `exp` já no passado (em vez de esperar 30 minutos ou logar de verdade), já que um login normal sempre gera um token válido
 
 ## Autora
 
