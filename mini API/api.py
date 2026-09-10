@@ -36,11 +36,15 @@ from pydantic import BaseModel
 # Importa datetime, usado para manipular datas e horas (ex: expiração de tokens)
 import datetime
 
+# Importa mysql.connector, usado para conectar e interagir com um banco de dados MySQL
+import mysql.connector
+
 # Cria a instância principal da aplicação FastAPI
 app = FastAPI()
 
 # Carrega as variáveis definidas no arquivo .env para o ambiente do processo
 load_dotenv()
+
 # Lê a variável de ambiente USUARIO_ROOT, usada para autenticar o usuário root
 USUARIO_ROOT = os.environ.get("USUARIO_ROOT")
 # Lê a variável de ambiente SENHA_ROOT, usada para autenticar o usuário root
@@ -67,6 +71,21 @@ def home():
     # Retorna uma mensagem simples de boas-vindas em formato JSON
     return {"message": "Bem-vindo à API!"}
 
+
+# Lê as variáveis de ambiente do banco de dados MariaDB
+MARIADB_USER = os.environ.get("MARIADB_USER")
+MARIADB_PASSWORD = os.environ.get("MARIADB_PASSWORD")
+MARIADB_DATABASE = os.environ.get("MARIADB_DATABASE")
+
+
+# Cria a conexão com o banco de dados MariaDB
+conexao = mysql.connector.connect(
+    # Configurações de conexão com o banco de dados MariaDB
+    host="137.131.133.237",
+    user=MARIADB_USER,
+    password=MARIADB_PASSWORD,
+    database=MARIADB_DATABASE
+)
 
 # Classe que representa um usuário internamente (não é um modelo do pydantic)
 class Usuario:
@@ -163,18 +182,20 @@ def cadastro(dados: UsuarioCadastro):
 @app.post("/login")
 # Função que autentica um usuário e retorna um token JWT se a autenticação for bem-sucedida
 def login(dados: UsuarioLogin):
-    # Extrai o email enviado no corpo da requisição
-    email_login = dados.email
-    # Extrai a senha enviada no corpo da requisição
-    senha_login = dados.senha
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (dados.email,))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
     # Verifica se o usuário autenticado é o root, comparando email e senha com
     # as variáveis de ambiente
-    if EMAIL_ROOT == email_login and SENHA_ROOT == senha_login:
+    if EMAIL_ROOT == dados.email and SENHA_ROOT == dados.senha:
         # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
         # usando o algoritmo HS256
-        jtoken = jwt.encode({"email": email_login, "papel": "root",
+        jtoken = jwt.encode({"email": dados.email, "papel": "root",
                             "exp": datetime.datetime.now(datetime.timezone.utc)
-                             + datetime.timedelta(minutes=30)},
+                            + datetime.timedelta(minutes=30)},
                             SECRET_KEY, algorithm="HS256")
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
@@ -182,28 +203,28 @@ def login(dados: UsuarioLogin):
         return {"token": jtoken}
     else:
         # Verifica se o email existe e bate com o cadastrado, e se a senha confere com o hash salvo
-        if email_login in usuario_cadastro:
+        if usuario is not None:
             # Verifica se o email e a senha conferem com os dados cadastrados
-            if bcrypt.checkpw(senha_login.encode('utf-8'), usuario_cadastro[email_login].senha):
+            if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario['senha'].encode('utf-8')):
                 # Gera um token JWT contendo o email e o papel, assinado com a SECRET_KEY
                 # usando o algoritmo HS256
-                jtoken = jwt.encode({"email": email_login,
-                                    "papel": usuario_cadastro[email_login].papel,
-                                     "exp": datetime.datetime.now(datetime.timezone.utc)
-                                     + datetime.timedelta(minutes=30)},
+                jtoken = jwt.encode({"email": dados.email,
+                                    "papel": usuario['papel'],
+                                    "exp": datetime.datetime.now(datetime.timezone.utc)
+                                    + datetime.timedelta(minutes=30)},
                                     SECRET_KEY, algorithm="HS256")
                 # Registra no log que o login foi realizado com sucesso
-                logging.info(f"Login realizado com sucesso para o email {email_login}.")
+                logging.info(f"Login realizado com sucesso para o email {dados.email}.")
                 # Retorna mensagem de sucesso junto com o token gerado
                 return {"mensagem": "Login realizado com sucesso!", "token": jtoken}
             else:
                 # Caso a senha não confira, registra o erro no log
-                logging.error(f"Senha incorreta para o email {email_login}.")
+                logging.error(f"Senha incorreta para o email {dados.email}.")
                 # Caso a senha não confira, retorna mensagem de senha incorreta
                 raise HTTPException(status_code=401, detail="Senha incorreta!")
         else:
             # Caso o email não exista no cadastro, registra o erro no log
-            logging.error(f"Email {email_login} não encontrado no cadastro.")
+            logging.error(f"Email {dados.email} não encontrado no cadastro.")
             # Caso email/senha não confiram, retorna mensagem de erro de login
             raise HTTPException(status_code=404, detail="Email incorreto!")
 
@@ -256,13 +277,20 @@ def admin(credenciais=Depends(HTTPBearer())):
             raise HTTPException(status_code=403,
                                 detail="Acesso negado! Usuário não é administrador.")
 
+
 # Rota PATCH "/admin/papel", usada para alterar o papel de um usuário específico
-
-
 @app.patch("/admin/papel")
 # Função que altera o papel de um usuário específico, exigindo autenticação de administrador
 # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
 def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (dados.email,))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
+    # Salva as alterações no banco de dados, caso tenha havido alguma modificação
+    conexao.commit()
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -280,9 +308,9 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Verifica se o email do usuário a ser alterado existe no cadastro
-        if dados.email in usuario_cadastro:
+        if usuario is not None:
             # Altera o papel do usuário especificado no corpo da requisição
-            usuario = usuario_cadastro[dados.email]
+            usuario = usuario['email']
             usuario.papel = dados.papel
             # Registra no log que o papel do usuário foi alterado com sucesso
             logging.info(
@@ -298,11 +326,11 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-        if usuario_cadastro[payload["email"]].papel == "admin":
+        if usuario[payload["email"]].papel == "admin":
             # Verifica se o email do usuário a ser alterado existe no cadastro
-            if dados.email in usuario_cadastro:
+            if usuario is not None:
                 # Altera o papel do usuário especificado no corpo da requisição
-                usuario = usuario_cadastro[dados.email]
+                usuario = usuario['email']
                 usuario.papel = dados.papel
                 # Registra no log que o papel do usuário foi alterado com sucesso
                 logging.info(
@@ -563,3 +591,4 @@ def perfil(credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
+    
