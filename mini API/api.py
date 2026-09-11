@@ -1,6 +1,6 @@
 # Importa a classe FastAPI (cria a aplicação) e Depends (injeta
 # dependências, ex: autenticação, nas rotas)
-from fastapi import Depends, FastAPI  # noqa: I001
+from fastapi import Depends, FastAPI  
 
 # Importa Optional do typing, usado para indicar que um campo é opcional
 from typing import Optional
@@ -235,6 +235,12 @@ def login(dados: UsuarioLogin):
 # credenciais: token Bearer extraído automaticamente do cabeçalho pela dependência HTTPBearer
 def admin(credenciais=Depends(HTTPBearer())):
     logging.info("Acessando a rota de administração...")
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (payload["email"],))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -254,18 +260,18 @@ def admin(credenciais=Depends(HTTPBearer())):
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Retorna a lista de emails dos usuários cadastrados em formato JSON
-        return {"usuarios": list(usuario_cadastro.keys())}
+        return {"usuarios": list(usuario.keys())}
     else:
-        if payload["email"] not in usuario_cadastro:
+        if payload["email"] not in usuario:
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-        if usuario_cadastro[payload["email"]].papel == "admin":
+        if usuario[payload["email"]].papel == "admin":
             lista_usuarios = []
             # Se o usuário for administrador, retorna o nome e email do usuário
-            for chave_secreta in usuario_cadastro:  # noqa: PLC0206
+            for chave_secreta in usuario:  
                 lista_usuarios.append({
-                    "nome": usuario_cadastro[chave_secreta].nome,
-                    "email": descriptografar_email(usuario_cadastro[chave_secreta].email)})
+                    "nome": usuario[chave_secreta].nome,
+                    "email": descriptografar_email(usuario[chave_secreta].email)})
             # Registra no log que o usuário administrador acessou a lista de usuários cadastrados
             logging.info(f"Usuário {payload['email']} acessou a lista de usuários cadastrados.")
             # Retorna a lista de usuários cadastrados (nome e email) em formato JSON
@@ -358,6 +364,14 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
 # Função que deleta um usuário específico, exigindo autenticação de administrador
 # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
 def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer())):
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (dados.email,))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
+    # Salva as alterações no banco de dados, caso tenha havido alguma modificação
+    conexao.commit()
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -375,9 +389,9 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Verifica se o email do usuário a ser deletado existe no cadastro
-        if dados.email in usuario_cadastro:
+        if usuario is not None:
             # Deleta o usuário especificado no corpo da requisição
-            del usuario_cadastro[dados.email]
+            del usuario[dados.email]
             # Registra no log que o usuário foi deletado com sucesso
             logging.info(f"Usuário {dados.email} deletado com sucesso por {payload['email']}.")
             # Registra que o usuário foi deletado
@@ -389,11 +403,11 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-        if usuario_cadastro[payload["email"]].papel == "admin":
+        if usuario[payload["email"]].papel == "admin":
             # Verifica se o email do usuário a ser deletado existe no cadastro
-            if dados.email in usuario_cadastro:
+            if dados.email in usuario:
                 # Deleta o usuário especificado no corpo da requisição
-                del usuario_cadastro[dados.email]
+                del usuario[dados.email]
                 # Registra no log que o usuário foi deletado com sucesso
                 logging.info(f"Usuário {dados.email} deletado com sucesso por {payload['email']}.")
                 # Registra que o usuário foi deletado
@@ -417,6 +431,8 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
 # Função que altera o perfil do usuário autenticado, usando o token JWT para identificar o usuário
 # credenciais: token Bearer extraído do cabeçalho, identifica quem está editando o próprio perfil
 def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer())):
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -430,31 +446,43 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer()
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (payload["email"],))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
     # Verifica se o email enviado no corpo da requisição já está em uso por outro usuário
-    if (
-        dados.email is not None
-        and dados.email in usuario_cadastro
-        and dados.email != payload["email"]
-    ):
+    if (usuario is not None and dados.email != payload["email"]):
+        if dados.nome  is not None:
+            # Atualiza o nome do usuário no banco de dados
+            cursor.execute("UPDATE usuarios SET nome = %s WHERE email = %s", (dados.nome, payload["email"]))
+        # Atualiza a senha e o nome do usuário, se fornecida no corpo da requisição
+        if dados.senha is not None:
+            # Atualiza a senha do usuário, fornecida no corpo da requisição
+            nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+            # Atualiza a senha do usuário no banco de dados
+            cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, payload["email"]))
+            # Se o email foi alterado, atualiza a chave no dicionário de cadastro
+            if dados.email is not None and dados.email != payload["email"]:
+                # Atualiza o email do usuário com o novo valor fornecido, criptografando-o
+                novo_email = criptografar_email(dados.email)
+                # Atualiza o email do usuário no banco de dados
+                cursor.execute("UPDATE usuarios SET email = %s WHERE email = %s", (novo_email, payload["email"]))
+                # Confirma as alterações do usuário no banco de dados
+                conexao.commit()
+            # Registra no log que os dados do usuário foram alterados com sucesso
+            logging.info(f"Dados do usuário {payload['email']} alterados com sucesso.")
+            # Retorna mensagem de sucesso após a alteração do perfil
+            return {"mensagem": "Perfil alterado com sucesso!"}
+        else: 
+            # Registra no log que as credenciais do usuario não estão corretas 
+            logging.info(f"Credenciais do usuario inválidas ou vazias,")
+            # Caso as credenciais estejam vazias ou incorretas retorna erro de conflito 
+            raise HTTPException(status_code=409, detail="Credenciais inválidas ou vazias!")
+    else:
         # Caso o email já esteja em uso, registra a informação no log
         logging.info(f"Email {dados.email} já está em uso por outro usuário.")
         # Caso o email já esteja em uso, retorna erro de conflito
         raise HTTPException(status_code=409, detail="Email já está em uso!")
-    # Atualiza os dados do usuário no dicionário de cadastro
-    usuario = usuario_cadastro[payload["email"]]
-    if dados.nome is not None:
-        usuario.nome = dados.nome
-    if dados.senha is not None:
-        usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
-    # Se o email foi alterado, atualiza a chave no dicionário de cadastro
-    if dados.email is not None and dados.email != payload["email"]:
-        usuario.email = criptografar_email(dados.email)
-        usuario_cadastro[dados.email] = usuario
-        del usuario_cadastro[payload["email"]]
-    # Registra no log que os dados do usuário foram alterados com sucesso
-    logging.info(f"Dados do usuário {payload['email']} alterados com sucesso.")
-    # Retorna mensagem de sucesso após a alteração do perfil
-    return {"mensagem": "Perfil alterado com sucesso!"}
 
 
 # Rota PATCH "/admin/usuario", usada para alterar a senha de um usuário específico
@@ -462,6 +490,8 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer()
 # Função que altera a senha de um usuário específico, exigindo autenticação de administrador
 # credenciais: token Bearer extraído do cabeçalho, exigido por essa rota protegida
 def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -475,20 +505,29 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (dados.email,))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
+    # Salva as alterações no banco de dados, caso tenha havido alguma modificação
+    conexao.commit()
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         # Registra no log que o usuário root foi autenticado com sucesso
         logging.info("Usuário root autenticado com sucesso.")
         # Verifica se o email do usuário a ser alterado existe no cadastro
-        if dados.email in usuario_cadastro:
-            if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario_cadastro[dados.email].senha):
+        if usuario is not None:
+            if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario["senha"].encode('utf-8')):
                 # Caso a nova senha seja igual à anterior, registra o erro no log
                 logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
                 # Caso a nova senha seja igual à anterior, registra o erro no log
                 raise HTTPException(status_code=409, detail="Essa senha é igual a anterior!")
             else:
                 # Altera a senha do usuário especificado no corpo da requisição
-                usuario = usuario_cadastro[dados.email]
-                usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                # Atualiza a senha do usuário no banco de dados
+                cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, dados.email)) 
+                # Confirma a alteração da senha no banco de dados
+                conexao.commit()
                 # Registra no log que a senha do usuário foi alterada com sucesso
                 logging.info(
                     f"Senha do usuário {dados.email} alterada com sucesso "
@@ -503,18 +542,21 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
         # Verifica se o usuário é administrador com base no papel armazenado no cadastro
-        if usuario_cadastro[payload["email"]].papel == "admin":
+        if payload["papel"] == "admin":
             # Verifica se o email do usuário a ser alterado existe no cadastro
-            if dados.email in usuario_cadastro:
-                if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario_cadastro[dados.email].senha):
+            if usuario is not None:
+                if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario["senha"].encode('utf-8')):
                     # Caso a nova senha seja igual à anterior, registra o erro no log
                     logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
                     # Caso a nova senha seja igual à anterior, registra o erro no log
                     raise HTTPException(status_code=409, detail="Essa senha é igual a anterior!")
                 else:
                     # Altera a senha do usuário especificado no corpo da requisição
-                    usuario = usuario_cadastro[dados.email]
-                    usuario.senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                    nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                    # Atualiza a senha do usuário no banco de dados
+                    cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, dados.email)) 
+                    # Confirma a alteração da senha no banco de dados
+                    conexao.commit()
                     # Registra no log que a senha do usuário foi alterada com sucesso
                     logging.info(
                         f"Senha do usuário {dados.email} alterada com sucesso "
@@ -540,6 +582,8 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
 @app.patch("/perfil/desativar")
 # Função que desativa o perfil do usuário autenticado, usando o token JWT para identificar o usuário
 def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
@@ -553,9 +597,15 @@ def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
         logging.error("Token inválido!")
         # Caso o token seja inválido, retorna erro de autenticação
         raise HTTPException(status_code=401, detail="Token inválido!")
-    if payload["email"] in usuario_cadastro:
-        # Desativa o usuário especificado no corpo da requisição
-        usuario_cadastro[payload["email"]].ativo = False
+    # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+    cursor.execute("SELECT * FROM usuarios WHERE email = %s", (payload["email"],))
+    # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+    usuario = cursor.fetchone()
+    if usuario is not None:
+        # Marca o usuário como inativo no banco de dados
+        cursor.execute("UPDATE usuarios SET ativo = %s WHERE email = %s",(False, payload["email"],))
+        # Salva as alterações no banco de dados, caso tenha havido alguma modificação
+        conexao.commit()
         # Registra no log que o usuário foi desativado com sucesso
         logging.info(f"Usuário {payload['email']} desativado com sucesso.")
         # Registra que o usuário foi desativado
@@ -574,13 +624,21 @@ def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
 def perfil(credenciais=Depends(HTTPBearer())):
     # Registra no log que o perfil está sendo acessado
     logging.info("Acessando o perfil do usuário...")
+    # Envia o comando SQL para o banco de dados, buscando o usuário pelo email fornecido
+    cursor = conexao.cursor(dictionary=True)
     try:
         # Extrai o token JWT do cabeçalho Authorization (Bearer)
         payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
+        # Manda a query para o banco de dados, buscando o usuário pelo email fornecido
+        cursor.execute("SELECT * FROM usuarios WHERE email = %s", (payload["email"],))
+        # Roda a query e pega o resultado, que será None se não houver usuário com esse email
+        usuario = cursor.fetchone()
+        # Salva as alterações no banco de dados, caso tenha havido alguma modificação
+        conexao.commit()
         # Registra no log que o perfil do usuário foi acessado com sucesso
         logging.info(f"Perfil do usuário {payload['email']} acessado com sucesso!")
         # Retorna o nome e email do usuário, obtidos a partir do payload do token
-        return {"nome": usuario_cadastro[payload["email"]].nome, "email": payload["email"]}
+        return {"nome": usuario["nome"], "email": payload["email"]}
     except jwt.ExpiredSignatureError:
         # Caso o token tenha expirado, registra o erro no log
         logging.error("Token expirado!")
