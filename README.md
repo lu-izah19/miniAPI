@@ -32,7 +32,7 @@ O projeto migrou do armazenamento em dicionário (em memória) para um banco de 
 - `GET /perfil` — corrigida a busca por email; adicionado tratamento explícito para o caso em que o usuário não é encontrado (404), evitando um erro não tratado quando a conta some do banco com o token ainda válido.
 - `PATCH /perfil/usuario` (editar o próprio perfil) — reescrita: os três campos opcionais (nome, senha, email) agora são totalmente independentes entre si, cada alteração tem seu próprio `commit()` e `return`; a checagem de "esse novo email já pertence a outro usuário" foi implementada de fato contra o banco; e foi tratado o caso-limite em que o usuário reenvia o próprio email sem alterá-lo (retorna sucesso sem tentar um update desnecessário).
 
-## 🚧 Reestruturação do projeto (em andamento)
+## ✅ Reestruturação do projeto (concluída)
 
 Por orientação da supervisora, o projeto está sendo reorganizado em múltiplos arquivos, seguindo o mesmo padrão usado por outra colega de estágio, em vez de manter tudo em um único `api.py`.
 
@@ -43,7 +43,7 @@ Por orientação da supervisora, o projeto está sendo reorganizado em múltiplo
 - `auth/auth.py` — criptografia/descriptografia de email (`Fernet`)
 - `main/main.py` — instância do FastAPI e todas as rotas
 
-O antigo `api.py` monolítico está sendo descontinuado em favor dessa separação por responsabilidade.
+O antigo `api.py` monolítico foi descontinuado em favor dessa separação por responsabilidade.
 
 A suíte de testes também foi dividida por domínio e migrada para trabalhar com o banco real, em vez do antigo dicionário `usuario_cadastro`:
 - `tests/conftest.py` — cliente de teste e funções auxiliares compartilhadas. A função `limpar_cadastro(email)` agora localiza o usuário de teste pelo mesmo padrão de busca por loop com descriptografia de email usado no resto do projeto e só executa o `DELETE` se encontrar o usuário correspondente, evitando erro quando o email ainda não existe no banco.
@@ -55,9 +55,7 @@ A suíte de testes também foi dividida por domínio e migrada para trabalhar co
 
 ## Plano para os próximos dias
 
-1. Apagar o `api.py` antigo depois de confirmar que `main.py` + módulos substituem ele por completo.
-2. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
-3. Revisar este README novamente após a limpeza final da reestruturação.
+1. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
 
 ## Funcionalidades
 
