@@ -3,6 +3,7 @@ from config import MARIADB_HOST, MARIADB_USER, MARIADB_PASSWORD, MARIADB_DATABAS
 
 conexao = mysql.connector.connect(
     host=MARIADB_HOST,
+    port=MARIADB_PORT,
     user=MARIADB_USER,
     password=MARIADB_PASSWORD,
     database=MARIADB_DATABASE
