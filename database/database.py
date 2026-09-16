@@ -1,5 +1,5 @@
 import mysql.connector
-from config import MARIADB_HOST, MARIADB_USER, MARIADB_PASSWORD, MARIADB_DATABASE
+from config import MARIADB_HOST,MARIADB_PORT, MARIADB_USER, MARIADB_PASSWORD, MARIADB_DATABASE
 
 conexao = mysql.connector.connect(
     host=MARIADB_HOST,
