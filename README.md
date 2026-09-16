@@ -15,7 +15,7 @@ Há autorização por papel (`user`/`admin`): o cadastro define `"user"` por pad
 
 A API cobre um CRUD completo de administração e de autogerenciamento de conta: um admin pode alterar o papel de qualquer usuário, excluir um usuário e resetar a senha de alguém que esqueceu; qualquer usuário logado pode editar o próprio perfil (nome, email e/ou senha, de forma independente) ou desativar a própria conta.
 
-O email do usuário é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica), diferente da senha (hash `bcrypt`, irreversível). **Como a criptografia com Fernet não é determinística** (o mesmo email gera um resultado diferente a cada vez que é criptografado), não é possível localizar um usuário no banco com um `WHERE email = %s` comparando o email puro digitado com o valor salvo. A solução adotada, sem alterar a estrutura da tabela, foi trazer todos os usuários (`SELECT` sem `WHERE`) e descriptografar o email de cada linha em um loop, até achar a que bate com o email recebido na requisição — esse padrão se repete em toda rota que precisa localizar um usuário pelo email.
+O email do usuário é criptografado em repouso: ele é salvo de forma reversível (`Fernet`, criptografia simétrica), diferente da senha (hash `bcrypt`, irreversível). **Como a criptografia com Fernet não é determinística** (o mesmo email gera um resultado diferente a cada vez que é criptografado), não é possível localizar um usuário no banco com um `WHERE email = %s` comparando o email puro digitado com o valor salvo. A solução adotada, sem alterar a estrutura da tabela, foi trazer todos os usuários (`SELECT` sem `WHERE`) e descriptografar o email de cada linha em um loop, até achar a que bate com o email recebido na requisição — esse padrão se repete em toda rota que precisa localizar um usuário pelo email, incluindo agora a limpeza de dados entre testes.
 
 ## ✅ Migração para MariaDB (concluída)
 
@@ -37,28 +37,27 @@ O projeto migrou do armazenamento em dicionário (em memória) para um banco de 
 Por orientação da supervisora, o projeto está sendo reorganizado em múltiplos arquivos, seguindo o mesmo padrão usado por outra colega de estágio, em vez de manter tudo em um único `api.py`.
 
 **Nova estrutura:**
-- `config.py` — variáveis de ambiente e configurações (chaves, credenciais do banco)
-- `database.py` — conexão com o MariaDB
+- `config/config.py` — variáveis de ambiente e configurações (chaves, credenciais do banco, incluindo agora host e porta)
+- `database/database.py` — conexão com o MariaDB
 - `models.py` — classes Pydantic e a classe de estado `Usuario`
-- `auth.py` — criptografia/descriptografia de email (`Fernet`)
-- `main.py` — instância do FastAPI e todas as rotas
+- `auth/auth.py` — criptografia/descriptografia de email (`Fernet`)
+- `main/main.py` — instância do FastAPI e todas as rotas
 
 O antigo `api.py` monolítico está sendo descontinuado em favor dessa separação por responsabilidade.
 
-A suíte de testes também está sendo dividida por domínio:
-- `tests/conftest.py` — cliente de teste e funções auxiliares compartilhadas
+A suíte de testes também foi dividida por domínio e migrada para trabalhar com o banco real, em vez do antigo dicionário `usuario_cadastro`:
+- `tests/conftest.py` — cliente de teste e funções auxiliares compartilhadas. A função `limpar_cadastro(email)` agora localiza o usuário de teste pelo mesmo padrão de busca por loop com descriptografia de email usado no resto do projeto e só executa o `DELETE` se encontrar o usuário correspondente, evitando erro quando o email ainda não existe no banco.
 - `tests/test_auth.py` — login, token e acesso a rotas protegidas
 - `tests/test_admin.py` — permissões e ações administrativas
 - `tests/test_perfil.py` — edição do próprio perfil
 
-## Plano para amanhã
+**Toda a suíte de testes está passando** contra a nova estrutura e o banco de dados real.
 
-1. Resolver a dependência de `usuario_cadastro` nos testes — esse dicionário em memória não existe mais desde a migração para SQL, então a função `limpar_cadastro()` e o import em `conftest.py` precisam de uma nova estratégia de limpeza de dados entre testes (ex: `DELETE`/truncate no banco de teste, ou emails únicos por teste).
-2. Confirmar que todos os imports do `main.py`, `config.py`, `database.py`, `models.py` e `auth.py` resolvem sem erro e que a API sobe normalmente com `uvicorn main:app --reload`.
-3. Rodar a suíte de testes reorganizada e revisar o que quebrar por causa da reestruturação.
-4. Apagar o `api.py` antigo depois de confirmar que `main.py` + módulos substituem ele por completo.
-5. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
-6. Atualizar este README com o resultado da reestruturação.
+## Plano para os próximos dias
+
+1. Apagar o `api.py` antigo depois de confirmar que `main.py` + módulos substituem ele por completo.
+2. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
+3. Revisar este README novamente após a limpeza final da reestruturação.
 
 ## Funcionalidades
 
@@ -75,7 +74,7 @@ A suíte de testes também está sendo dividida por domínio:
 - Tratamento de erros HTTP específicos: 404, 401, 403, 409
 - Registro de eventos via `logging`, incluindo trilha de auditoria nas ações administrativas
 - Criptografia reversível do email em repouso (`Fernet`), com busca por descriptografia em loop (já que Fernet não é determinístico)
-- Testes automatizados com `pytest` e `TestClient`, organizados por domínio
+- Testes automatizados com `pytest` e `TestClient`, organizados por domínio, rodando contra o banco de dados real
 - Padrão de estilo verificado por `flake8`
 
 ## Tecnologias utilizadas
@@ -110,6 +109,7 @@ A suíte de testes também está sendo dividida por domínio:
 - Por que múltiplos `if` independentes, cada um terminando em `return`, garantem que campos opcionais de uma rota (nome, senha, email) sejam realmente tratados de forma isolada — sem um cobrir ou pular o outro por engano
 - Diferença entre reatribuir a mesma variável para dois propósitos diferentes (ex: usar `usuario` tanto para "quem está logado" quanto para "quem já tem esse email") e usar duas variáveis com nomes distintos — reaproveitar o nome apaga a referência anterior antes dela ser usada
 - Uma função Python que termina sem bater em nenhum `return` explícito devolve `None` silenciosamente — o que pode fazer uma API responder "sucesso" vazio quando na real nada foi processado
+- Por que uma função de limpeza de dados de teste precisa proteger uma operação de escrita (como um `DELETE`) contra o caso em que a busca anterior não encontrou nada — sem esse `if`, tentar acessar uma chave de `None` estoura `TypeError`
 
 ## Versão terminal
 
@@ -146,6 +146,8 @@ FERNET_KEY=<chave gerada com Fernet.generate_key()>
 USUARIO_ROOT=<nome de exibição do usuário root>
 SENHA_ROOT=<senha do usuário root>
 EMAIL_ROOT=<email do usuário root>
+MARIADB_HOST=<host do banco MariaDB>
+MARIADB_PORT=<porta do banco MariaDB>
 MARIADB_USER=<usuário do banco MariaDB>
 MARIADB_PASSWORD=<senha do banco MariaDB>
 MARIADB_DATABASE=<nome do banco MariaDB>
@@ -154,22 +156,35 @@ MARIADB_DATABASE=<nome do banco MariaDB>
 ### Como rodar
 
 ```bash
-uvicorn main:app --reload
+uvicorn main.main:app --reload
 ```
 
 ## Testes automatizados
 
-> ⚠️ Nota: a suíte de testes ainda foi escrita contra a versão em dicionário da API e depende de `usuario_cadastro`, que não existe mais desde a migração para MariaDB. Precisa de revisão antes de rodar contra o `main.py` atual — item prioritário do próximo dia de trabalho.
+A suíte de testes roda contra o banco MariaDB real e está organizada por domínio. A limpeza de dados entre testes é feita via `DELETE` no banco (em vez do antigo dicionário `usuario_cadastro`), usando o mesmo padrão de busca por descriptografia de email do restante do projeto.
+
+**Toda a suíte está passando.**
 
 ```bash
 pytest
+```
+
+Para rodar tudo, de qualquer subpasta:
+```bash
+pytest
+```
+
+Para rodar uma pasta ou arquivo específico:
+```bash
+pytest tests/
+pytest tests/test_admin.py
 ```
 
 ## Qualidade de código (lint)
 
 ```bash
 pip install flake8
-flake8 main.py config.py database.py models.py auth.py
+flake8 .
 ```
 
 ## Autora
