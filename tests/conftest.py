@@ -1,11 +1,24 @@
 from fastapi.testclient import TestClient
-from main import app, usuario_cadastro
+from main.main import app
+from database.database import conexao
+from auth.auth import descriptografar_email
 
 client = TestClient(app)
 
 
-def limpar_cadastro():
-    usuario_cadastro.clear()
+def limpar_cadastro(email):
+    cursor = conexao.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM usuarios")
+    todos_usuarios = cursor.fetchall()
+    usuario = None
+    for linha in todos_usuarios:
+        if descriptografar_email(linha["email"]) == email:
+            usuario = linha
+            break
+    if usuario is not None:
+        cursor.execute("DELETE FROM usuarios WHERE email = %s", (usuario["email"],))
+        conexao.commit()
+        cursor.close()
 
 
 def cadastrar(nome, email, senha):
