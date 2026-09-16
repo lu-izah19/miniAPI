@@ -9,6 +9,7 @@ EMAIL_ROOT = os.environ.get("EMAIL_ROOT")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 FERNET_KEY = os.environ.get("FERNET_KEY")
 
+MARIADB_HOST = os.environ.get("MARIADB_HOST")
 MARIADB_USER = os.environ.get("MARIADB_USER")
 MARIADB_PASSWORD = os.environ.get("MARIADB_PASSWORD")
 MARIADB_DATABASE = os.environ.get("MARIADB_DATABASE")
