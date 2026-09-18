@@ -4,11 +4,10 @@ import bcrypt
 import jwt
 import mysql.connector
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.security import HTTPBearer
+from auth import criptografar_email, descriptografar_email, validar_usuario
 
 from config import SECRET_KEY, EMAIL_ROOT, SENHA_ROOT
 from database import conexao
-from auth import criptografar_email, descriptografar_email
 from models import (
     UsuarioCadastro,
     UsuarioLogin,
@@ -82,17 +81,9 @@ def login(dados: UsuarioLogin):
 
 
 @app.get("/admin")
-def admin(credenciais=Depends(HTTPBearer())):
+def admin(payload=Depends(validar_usuario)):
     logging.info("Acessando a rota de administração...")
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
         cursor.execute("SELECT * FROM usuarios")
@@ -133,16 +124,8 @@ def admin(credenciais=Depends(HTTPBearer())):
 
 
 @app.patch("/admin/papel")
-def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
+def alterar_papel(dados: AlterarPapel, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
         cursor.execute("SELECT * FROM usuarios")
@@ -191,16 +174,8 @@ def alterar_papel(dados: AlterarPapel, credenciais=Depends(HTTPBearer())):
 
 
 @app.delete("/admin/usuario")
-def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer())):
+def deletar_perfil_usuario(dados: UsuarioDelete, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
         cursor.execute("SELECT * FROM usuarios")
@@ -243,16 +218,8 @@ def deletar_perfil_usuario(dados: UsuarioDelete, credenciais=Depends(HTTPBearer(
 
 
 @app.patch("/perfil/usuario")
-def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer())):
+def alterar_perfil(dados: UsuarioAlterarPerfil, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     if (payload["email"] is not None):
         cursor.execute("SELECT * FROM usuarios")
         todos_usuarios = cursor.fetchall()
@@ -268,7 +235,7 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer()
                 logging.info(f"Nome do usuário {payload['email']} alterado com sucesso.")
                 return {"mensagem": "Perfil alterado com sucesso!"}
             if dados.senha is not None:
-                nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt().decode('utf-8'))
                 cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, usuario["email"]))
                 conexao.commit()
                 logging.info(f"Senha do usuário {payload['email']} alterada com sucesso.")
@@ -299,16 +266,8 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, credenciais=Depends(HTTPBearer()
 
 
 @app.patch("/admin/usuario")
-def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
+def alterar_senha(dados: UsuarioSenha, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
         cursor.execute("SELECT * FROM usuarios")
@@ -323,7 +282,7 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
                 logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
                 raise HTTPException(status_code=409, detail="Essa senha é igual a anterior!")
             else:
-                nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt().decode('utf-8'))
                 cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, usuario["email"]))
                 conexao.commit()
                 logging.info(
@@ -348,7 +307,7 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
                     logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
                     raise HTTPException(status_code=409, detail="Essa senha é igual a anterior!")
                 else:
-                    nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt())
+                    nova_senha = bcrypt.hashpw(dados.senha.encode('utf-8'), bcrypt.gensalt().decode('utf-8'))
                     cursor.execute("UPDATE usuarios SET senha = %s WHERE email = %s", (nova_senha, usuario["email"]))
                     conexao.commit()
                     logging.info(
@@ -367,16 +326,8 @@ def alterar_senha(dados: UsuarioSenha, credenciais=Depends(HTTPBearer())):
 
 
 @app.patch("/perfil/desativar")
-def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
+def desativar_perfil_proprio(payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     cursor.execute("SELECT * FROM usuarios")
     todos_usuarios = cursor.fetchall()
     usuario = None
@@ -395,17 +346,9 @@ def desativar_perfil_proprio(credenciais=Depends(HTTPBearer())):
 
 
 @app.get("/perfil")
-def perfil(credenciais=Depends(HTTPBearer())):
+def perfil(payload=Depends(validar_usuario)):
     logging.info("Acessando o perfil do usuário...")
     cursor = conexao.cursor(dictionary=True)
-    try:
-        payload = jwt.decode(credenciais.credentials, SECRET_KEY, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        logging.error("Token expirado!")
-        raise HTTPException(status_code=401, detail="Token expirado!")
-    except jwt.InvalidTokenError:
-        logging.error("Token inválido!")
-        raise HTTPException(status_code=401, detail="Token inválido!")
     cursor.execute("SELECT * FROM usuarios")
     todos_usuarios = cursor.fetchall()
     usuario = None
