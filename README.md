@@ -39,8 +39,8 @@ Por orientação da supervisora, o projeto está sendo reorganizado em múltiplo
 **Nova estrutura:**
 - `config/config.py` — variáveis de ambiente e configurações (chaves, credenciais do banco, incluindo agora host e porta)
 - `database/database.py` — conexão com o MariaDB
-- `models.py` — classes Pydantic e a classe de estado `Usuario`
-- `auth/auth.py` — criptografia/descriptografia de email (`Fernet`)
+- `models.py` — classes Pydantic, e agora também o modelo real do SQLAlchemy (`Usuario(Base)`) usado pelo Alembic para versionar o schema
+- `auth/auth.py` — criptografia/descriptografia de email (`Fernet`), decodificação de token JWT e busca de usuário por email
 - `main/main.py` — instância do FastAPI e todas as rotas
 
 O antigo `api.py` monolítico foi descontinuado em favor dessa separação por responsabilidade.
@@ -53,9 +53,29 @@ A suíte de testes também foi dividida por domínio e migrada para trabalhar co
 
 **Toda a suíte de testes está passando** contra a nova estrutura e o banco de dados real.
 
+## ✅ Versionamento de schema com Alembic (concluído)
+
+O schema do banco passou a ser versionado com **Alembic**, em vez de alterações manuais direto no MariaDB via HeidiSQL.
+
+- Criado um modelo real do SQLAlchemy (`Usuario(Base)`, com `declarative_base()`) em `models.py` — substituindo a antiga classe `Usuario`, que só guardava atributos num `__init__` e não era reconhecida como modelo pelo Alembic.
+- `env.py` e `alembic.ini` configurados para ler a URL de conexão a partir do `.env` (variável `DATABASE_URL`), em vez de deixar a credencial do banco exposta no `alembic.ini` versionado.
+- Como a tabela `usuarios` já existia no banco (criada manualmente antes do Alembic entrar no projeto), o histórico foi "adotado" com `alembic stamp head`, em vez de deixar o Alembic tentar recriá-la do zero e falhar com "tabela já existe".
+- Primeira migration de verdade aplicada com sucesso, adicionando a coluna `ativo` (usada pela rota de desativação de conta), que ainda não existia nessa tabela.
+
+## 🔧 Refatoração com Dependency Injection (em andamento)
+
+As rotas protegidas tinham dois blocos de código repetidos em quase toda rota: a decodificação manual do token JWT (com `try/except`) e a busca de um usuário pelo email criptografado (loop com `descriptografar_email`). Esses blocos foram extraídos em funções centralizadas no `auth.py`:
+
+- `validar_usuario` — dependency do FastAPI que decodifica o token JWT e devolve o `payload`, tratando `token expirado`/`token inválido` num único lugar. Todas as rotas protegidas trocaram `credenciais=Depends(HTTPBearer())` + bloco `try/except` manual por `payload=Depends(validar_usuario)`.
+- `buscar_usuario_por_email(email)` — recebe um email como string e devolve a linha do usuário correspondente (ou `None`), substituindo o loop de busca repetido. É chamada manualmente dentro de cada rota (não encadeada via `Depends()`, já que o email de origem varia: às vezes é o de quem está logado, `payload["email"]`, às vezes é o de um usuário-alvo vindo do corpo da requisição, `dados.email`).
+
+Ainda falta extrair a checagem de permissão (root/admin), que também se repete nas rotas administrativas, numa terceira função.
+
 ## Plano para os próximos dias
 
-1. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
+1. Extrair a checagem de permissão admin/root (repetida nas rotas administrativas) numa dependency separada.
+2. Rodar `flake8`/`autopep8` na nova estrutura de arquivos.
+3. Reconferir a suíte de testes depois do refactor com `Depends` e da migração para Alembic.
 
 ## Funcionalidades
 
@@ -72,6 +92,8 @@ A suíte de testes também foi dividida por domínio e migrada para trabalhar co
 - Tratamento de erros HTTP específicos: 404, 401, 403, 409
 - Registro de eventos via `logging`, incluindo trilha de auditoria nas ações administrativas
 - Criptografia reversível do email em repouso (`Fernet`), com busca por descriptografia em loop (já que Fernet não é determinístico)
+- Versionamento do schema do banco com Alembic, a partir de um modelo real do SQLAlchemy
+- Autenticação e busca de usuário centralizadas em dependencies reutilizáveis do FastAPI, em vez de código repetido em cada rota
 - Testes automatizados com `pytest` e `TestClient`, organizados por domínio, rodando contra o banco de dados real
 - Padrão de estilo verificado por `flake8`
 
@@ -80,11 +102,14 @@ A suíte de testes também foi dividida por domínio e migrada para trabalhar co
 - Python 3
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Pydantic](https://docs.pydantic.dev/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
+- [Alembic](https://alembic.sqlalchemy.org/)
 - [bcrypt](https://pypi.org/project/bcrypt/)
 - [PyJWT](https://pyjwt.readthedocs.io/)
 - [cryptography](https://cryptography.io/) *(Fernet)*
 - [python-dotenv](https://pypi.org/project/python-dotenv/)
 - [mysql-connector-python](https://pypi.org/project/mysql-connector-python/)
+- [PyMySQL](https://pypi.org/project/PyMySQL/) *(driver usado pelo SQLAlchemy/Alembic)*
 - Módulo `datetime` da biblioteca padrão
 - [pytest](https://docs.pytest.org/)
 - [httpx](https://www.python-httpx.org/)
@@ -108,6 +133,11 @@ A suíte de testes também foi dividida por domínio e migrada para trabalhar co
 - Diferença entre reatribuir a mesma variável para dois propósitos diferentes (ex: usar `usuario` tanto para "quem está logado" quanto para "quem já tem esse email") e usar duas variáveis com nomes distintos — reaproveitar o nome apaga a referência anterior antes dela ser usada
 - Uma função Python que termina sem bater em nenhum `return` explícito devolve `None` silenciosamente — o que pode fazer uma API responder "sucesso" vazio quando na real nada foi processado
 - Por que uma função de limpeza de dados de teste precisa proteger uma operação de escrita (como um `DELETE`) contra o caso em que a busca anterior não encontrou nada — sem esse `if`, tentar acessar uma chave de `None` estoura `TypeError`
+- Diferença entre importar um módulo (usado só pra organizar/agrupar código) e uma classe de verdade usável como tipo — anotar um parâmetro com o nome de um módulo (`dados: models`) não funciona como tipo
+- Por que o `target_metadata` do Alembic precisa apontar pra uma `Base` real do SQLAlchemy (com tabelas mapeadas via `Column`/`__tablename__`), e não pra uma classe Python comum, mesmo que ela tenha o mesmo nome do modelo esperado
+- Por que rodar `alembic upgrade head` contra uma tabela criada manualmente antes do Alembic existir tenta recriá-la do zero e falha com "tabela já existe" — e como `alembic stamp head` resolve isso, marcando a migration como aplicada sem executar o SQL dela
+- O que é uma dependency do FastAPI (`Depends`) na prática: uma função comum que o FastAPI chama automaticamente antes da rota, cujo retorno vira o parâmetro da rota — e que uma dependency pode, ela mesma, depender de outra dependency
+- Por que uma função auxiliar que recebe um email como string simples (em vez do objeto/dicionário de onde ele veio) pode ser reaproveitada em contextos diferentes — pra quem está logado (`payload["email"]`) e pra um usuário-alvo (`dados.email`) — sem precisar de duas funções quase idênticas
 
 ## Versão terminal
 
@@ -149,12 +179,20 @@ MARIADB_PORT=<porta do banco MariaDB>
 MARIADB_USER=<usuário do banco MariaDB>
 MARIADB_PASSWORD=<senha do banco MariaDB>
 MARIADB_DATABASE=<nome do banco MariaDB>
+DATABASE_URL=<string de conexão usada pelo Alembic/SQLAlchemy, ex: mariadb+pymysql://usuario:senha@host:porta/banco?charset=utf8mb4>
 ```
 
 ### Como rodar
 
 ```bash
 uvicorn main.main:app --reload
+```
+
+### Migrações de banco (Alembic)
+
+```bash
+alembic revision --autogenerate -m "descrição da mudança"
+alembic upgrade head
 ```
 
 ## Testes automatizados
