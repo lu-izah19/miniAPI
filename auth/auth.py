@@ -28,3 +28,14 @@ def validar_usuario(credenciais=Depends(HTTPBearer())):
     except jwt.InvalidTokenError:
         logging.error("Token inválido!")
         raise HTTPException(status_code=401, detail="Token inválido!")
+
+def buscar_usuario_por_email(email: str):
+    cursor = conexao.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM usuarios")
+    todos_usuarios = cursor.fetchall()
+    usuario = None
+    for linha in todos_usuarios:
+        if descriptografar_email(linha["email"]) == email:
+            usuario = linha
+            break
+    return usuario
