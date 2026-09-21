@@ -21,11 +21,6 @@ class UsuarioLogin(BaseModel):
     senha: str
 
 
-class UsuarioPerfil(BaseModel):
-    nome: str
-    email: str
-
-
 class AlterarPapel(BaseModel):
     email: str
     papel: str
