@@ -4,14 +4,14 @@ import bcrypt
 import jwt
 import mysql.connector
 from fastapi import Depends, FastAPI, HTTPException
-from auth import criptografar_email, descriptografar_email, validar_usuario
+from auth import criptografar_email, descriptografar_email
+from auth import validar_usuario, buscar_usuario_por_email
 
 from config import SECRET_KEY, EMAIL_ROOT, SENHA_ROOT
 from database import conexao
 from models import (
     UsuarioCadastro,
     UsuarioLogin,
-    UsuarioPerfil,
     AlterarPapel,
     UsuarioDelete,
     UsuarioSenha,
@@ -47,14 +47,7 @@ def cadastro(dados: UsuarioCadastro):
 
 @app.post("/login")
 def login(dados: UsuarioLogin):
-    cursor = conexao.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM usuarios")
-    todos_usuarios = cursor.fetchall()
-    usuario = None
-    for linha in todos_usuarios:
-        if descriptografar_email(linha["email"]) == dados.email:
-            usuario = linha
-            break
+    usuario = buscar_usuario_por_email(dados.email)
     if EMAIL_ROOT == dados.email and SENHA_ROOT == dados.senha:
         jtoken = jwt.encode({"email": dados.email, "papel": "root",
                             "exp": datetime.datetime.now(datetime.timezone.utc)
@@ -97,13 +90,7 @@ def admin(payload=Depends(validar_usuario)):
         logging.info(f"Usuário {payload['email']} acessou a lista de usuários cadastrados.")
         return{"usuarios": lista_usuarios}
     else:
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == payload["email"]:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(payload["email"])
         if usuario is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
         if usuario["papel"]== "admin":
@@ -128,13 +115,7 @@ def alterar_papel(dados: AlterarPapel, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == dados.email:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(dados.email)
         if usuario is not None:
             cursor.execute("UPDATE usuarios SET papel = %s WHERE email = %s", (dados.papel, usuario["email"]))
             conexao.commit()
@@ -147,13 +128,7 @@ def alterar_papel(dados: AlterarPapel, payload=Depends(validar_usuario)):
             logging.error(f"Usuário {dados.email} não encontrado para alteração de papel.")
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == dados.email:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(dados.email)
         if payload["papel"] == "admin":
             if usuario is not None:
                 cursor.execute("UPDATE usuarios SET papel = %s WHERE email = %s", (dados.papel, usuario["email"]))
@@ -178,13 +153,7 @@ def deletar_perfil_usuario(dados: UsuarioDelete, payload=Depends(validar_usuario
     cursor = conexao.cursor(dictionary=True)
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == dados.email:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(dados.email)
         if usuario is not None:
             cursor.execute("DELETE FROM usuarios WHERE email = %s", (usuario["email"],))
             conexao.commit()
@@ -195,13 +164,7 @@ def deletar_perfil_usuario(dados: UsuarioDelete, payload=Depends(validar_usuario
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
         if payload["papel"] == "admin":
-            cursor.execute("SELECT * FROM usuarios")
-            todos_usuarios = cursor.fetchall()
-            usuario = None
-            for linha in todos_usuarios:
-                if descriptografar_email(linha["email"]) == dados.email:
-                    usuario = linha
-                    break
+            usuario = buscar_usuario_por_email(dados.email)
             if usuario is not None:
                 cursor.execute("DELETE FROM usuarios WHERE email = %s", (usuario["email"],))
                 conexao.commit()
@@ -221,13 +184,7 @@ def deletar_perfil_usuario(dados: UsuarioDelete, payload=Depends(validar_usuario
 def alterar_perfil(dados: UsuarioAlterarPerfil, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
     if (payload["email"] is not None):
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == payload["email"]:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(payload["email"])
         if usuario is not None:
             if dados.nome is not None:
                 cursor.execute("UPDATE usuarios SET nome = %s WHERE email = %s", (dados.nome, usuario["email"]))
@@ -241,15 +198,9 @@ def alterar_perfil(dados: UsuarioAlterarPerfil, payload=Depends(validar_usuario)
                 logging.info(f"Senha do usuário {payload['email']} alterada com sucesso.")
                 return {"mensagem": "Perfil alterado com sucesso!"}
             if dados.email is not None:
-                cursor.execute("SELECT * FROM usuarios")
-                todos_usuarios = cursor.fetchall()
-                usuario_novo_email = None
-                for linha in todos_usuarios:
-                    if descriptografar_email(linha["email"]) == dados.email:
-                        usuario_novo_email = linha
-                        break
-                if usuario_novo_email is not None:
-                    if dados.email != usuario_novo_email["email"] and dados.email != payload["email"]:
+                usuario_novo = buscar_usuario_por_email(dados.email)
+                if usuario_novo is not None:
+                    if dados.email != usuario_novo["email"] and dados.email != payload["email"]:
                         logging.info(f"Email {dados.email} já está em uso por outro usuário.")
                         raise HTTPException(status_code=409, detail="Email já está em uso!")
                     else:
@@ -270,13 +221,7 @@ def alterar_senha(dados: UsuarioSenha, payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
     if EMAIL_ROOT == payload["email"] and payload["papel"] == "root":
         logging.info("Usuário root autenticado com sucesso.")
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == dados.email:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(dados.email)
         if usuario is not None:
             if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario["senha"].encode('utf-8')):
                 logging.error(f"A nova senha do usuário {dados.email} é igual à anterior.")
@@ -294,13 +239,7 @@ def alterar_senha(dados: UsuarioSenha, payload=Depends(validar_usuario)):
             logging.error(f"Usuário {dados.email} não encontrado para alteração de senha.")
             raise HTTPException(status_code=404, detail="Usuário não encontrado!")
     else:
-        cursor.execute("SELECT * FROM usuarios")
-        todos_usuarios = cursor.fetchall()
-        usuario = None
-        for linha in todos_usuarios:
-            if descriptografar_email(linha["email"]) == dados.email:
-                usuario = linha
-                break
+        usuario = buscar_usuario_por_email(dados.email)
         if payload["papel"] == "admin":
             if usuario is not None:
                 if bcrypt.checkpw(dados.senha.encode('utf-8'), usuario["senha"].encode('utf-8')):
@@ -328,13 +267,7 @@ def alterar_senha(dados: UsuarioSenha, payload=Depends(validar_usuario)):
 @app.patch("/perfil/desativar")
 def desativar_perfil_proprio(payload=Depends(validar_usuario)):
     cursor = conexao.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM usuarios")
-    todos_usuarios = cursor.fetchall()
-    usuario = None
-    for linha in todos_usuarios:
-        if descriptografar_email(linha["email"]) == payload["email"]:
-            usuario = linha
-            break
+    usuario = buscar_usuario_por_email(payload["email"])
     if usuario is not None:
         cursor.execute("UPDATE usuarios SET ativo = %s WHERE email = %s",(False, usuario["email"],))
         conexao.commit()
@@ -348,14 +281,7 @@ def desativar_perfil_proprio(payload=Depends(validar_usuario)):
 @app.get("/perfil")
 def perfil(payload=Depends(validar_usuario)):
     logging.info("Acessando o perfil do usuário...")
-    cursor = conexao.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM usuarios")
-    todos_usuarios = cursor.fetchall()
-    usuario = None
-    for linha in todos_usuarios:
-        if descriptografar_email(linha["email"]) == payload["email"]:
-            usuario = linha
-            break
+    usuario = buscar_usuario_por_email(payload["email"])
     if usuario is not None:
         logging.info(f"Perfil do usuário {payload['email']} acessado com sucesso!")
         return {"nome": usuario["nome"], "email": payload["email"]}
